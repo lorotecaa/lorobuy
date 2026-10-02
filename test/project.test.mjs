@@ -8,12 +8,16 @@ import { buildContentSecurityPolicy } from '../src/security.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
+const adminHtml = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
 const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
+const builtAdminHtml = fs.readFileSync(path.join(root, 'dist', 'admin.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
+const authSource = fs.readFileSync(path.join(root, 'src', 'auth.mjs'), 'utf8');
 const configSource = fs.readFileSync(path.join(root, 'src', 'config.mjs'), 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const renderConfig = fs.readFileSync(path.join(root, 'render.yaml'), 'utf8');
 const schema = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020001_initial_schema.sql'), 'utf8');
+const adminMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020004_admin_role.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -30,12 +34,26 @@ test('production configuration requires HTTPS origins and Supabase URL', () => {
 
 test('CSP allows only the same-origin API and hashed inline code', () => {
   const policy = buildContentSecurityPolicy(html);
+  const adminPolicy = buildContentSecurityPolicy(adminHtml);
+  assert.equal(policy, buildContentSecurityPolicy(html.replace(/\r\n/g, '\n')));
   assert.match(policy, /connect-src 'self'/);
+  assert.match(adminPolicy, /connect-src 'self'/);
   assert.match(policy, /script-src 'sha256-[^']+' 'strict-dynamic'/);
   assert.match(policy, /style-src 'sha256-[^']+'/);
   assert.match(policy, /frame-ancestors 'none'/);
   assert.doesNotMatch(policy, /'unsafe-inline'/);
   assert.doesNotMatch(policy, /https:\/\/(?!placeholder)/);
+  assert.doesNotMatch(adminPolicy, /'unsafe-inline'/);
+});
+
+test('account interface provides sign-in, registration, profile, and admin entry points', () => {
+  assert.match(html, /id="accountDialog"/);
+  assert.match(html, /id="signinForm"/);
+  assert.match(html, /id="signupForm"/);
+  assert.match(html, /id="profileForm"/);
+  assert.match(html, /href="\/admin"/);
+  assert.match(html, /apiRequest\('\/api\/auth\/session'/);
+  assert.match(html, /fetch\(url/);
 });
 
 test('catalog and cart are loaded through the API, not local product arrays', () => {
@@ -53,6 +71,7 @@ test('Render build and start commands produce the directory used by the server',
   assert.match(renderConfig, /startCommand: npm start/);
   assert.match(server, /path\.join\(ROOT_DIR, 'dist'\)/);
   assert.equal(builtHtml, html);
+  assert.equal(builtAdminHtml, adminHtml);
 });
 
 test('server uses only the Supabase publishable key', () => {
@@ -71,8 +90,21 @@ test('every application table enables RLS', () => {
   }
 });
 
+test('admin access is enforced by confirmed Supabase identity, backend role checks, and RLS', () => {
+  assert.match(server, /app\.get\('\/admin'/);
+  assert.match(server, /profile\?\.role !== 'admin'/);
+  assert.match(authSource, /profile\?\.role !== 'admin'/);
+  assert.match(authSource, /!session\.user\.email_confirmed_at/);
+  assert.match(schema, /grant update \(display_name, avatar_url\) on table public\.profiles to authenticated;/);
+  assert.doesNotMatch(schema, /grant update \([^)]*role[^)]*\) on table public\.profiles/);
+  assert.match(adminMigration, /lower\(coalesce\(new\.email, ''\)\) = 'loroteca98@gmail\.com'/);
+  assert.match(adminMigration, /new\.email_confirmed_at is not null/);
+  assert.match(adminMigration, /set role = 'admin'/);
+  assert.match(adminMigration, /join auth\.users u on u\.id = p\.id/);
+});
+
 test('all referenced local assets exist', () => {
-  const references = [...html.matchAll(/(?:src|href)="(assets\/[^"]+)"/g)].map((match) => match[1]);
+  const references = [...`${html}\n${adminHtml}`.matchAll(/(?:src|href)="(assets\/[^"]+)"/g)].map((match) => match[1]);
   for (const reference of references) {
     assert.equal(fs.existsSync(path.join(root, 'frontend', reference)), true, reference);
   }

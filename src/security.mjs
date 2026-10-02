@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 
 function sha256(content) {
-  return crypto.createHash('sha256').update(content, 'utf8').digest('base64');
+  const browserNormalizedContent = content.replace(/\r\n?/g, '\n');
+  return crypto.createHash('sha256').update(browserNormalizedContent, 'utf8').digest('base64');
 }
 
 function firstInlineTag(html, tagName) {

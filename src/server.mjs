@@ -3,7 +3,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import helmet from 'helmet';
-import { clearSessionCookies, getRequestSession, requireAdmin, revokeRequestSession, setSessionCookies } from './auth.mjs';
+import {
+  clearSessionCookies,
+  getRequestSession,
+  getSessionProfile,
+  requireAdmin,
+  revokeRequestSession,
+  setSessionCookies,
+} from './auth.mjs';
 import { loadConfig } from './config.mjs';
 import { buildContentSecurityPolicy, requireSameOrigin } from './security.mjs';
 import { createPublicSupabase } from './supabase.mjs';
@@ -13,11 +20,14 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 const FRONTEND_BUILD_DIR = path.join(ROOT_DIR, 'dist');
 const ASSET_DIR = path.join(FRONTEND_BUILD_DIR, 'assets');
 const INDEX_FILE = path.join(FRONTEND_BUILD_DIR, 'index.html');
-if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(ASSET_DIR)) {
+const ADMIN_FILE = path.join(FRONTEND_BUILD_DIR, 'admin.html');
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(ASSET_DIR)) {
   throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
 }
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
+const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml);
+const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml);
 const config = loadConfig();
 const publicSupabase = createPublicSupabase(config);
 const app = express();
@@ -35,7 +45,7 @@ app.use(helmet({
 }));
 app.use((request, response, next) => {
   response.set({
-    'Content-Security-Policy': contentSecurityPolicy,
+    'Content-Security-Policy': request.path === '/admin' ? adminContentSecurityPolicy : contentSecurityPolicy,
     'Permissions-Policy': 'accelerometer=(), autoplay=(self), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), fullscreen=(self), gamepad=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), xr-spatial-tracking=()',
     'X-DNS-Prefetch-Control': 'off',
     'X-Permitted-Cross-Domain-Policies': 'none',
@@ -154,13 +164,18 @@ app.get('/api/products', asyncRoute(async (_request, response) => {
 
 app.get('/api/auth/session', asyncRoute(async (request, response) => {
   const session = await getRequestSession(request, response, config);
+  const signedIn = Boolean(session && !session.user.is_anonymous);
+  const profile = signedIn ? await getSessionProfile(session) : null;
   response.set('Cache-Control', 'private, no-store, max-age=0');
   return response.json({
-    authenticated: Boolean(session),
-    user: session ? {
+    authenticated: signedIn,
+    user: signedIn ? {
       id: session.user.id,
       email: session.user.email ?? null,
-      isAnonymous: Boolean(session.user.is_anonymous),
+      displayName: profile?.display_name ?? null,
+      avatarUrl: profile?.avatar_url ?? null,
+      role: profile?.role ?? 'customer',
+      isAdmin: profile?.role === 'admin' && Boolean(session.user.email_confirmed_at),
     } : null,
   });
 }));
@@ -174,13 +189,18 @@ app.post('/api/auth/anonymous', asyncRoute(async (request, response) => {
 }));
 
 app.post('/api/auth/signup', asyncRoute(async (request, response) => {
+  const displayName = normalizeText(request.body?.displayName, 100, { required: true });
   const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
   const password = normalizeText(request.body?.password, 128, { required: true });
-  if (!email || !EMAIL_PATTERN.test(email) || !password || password.length < 12) {
-    return response.status(400).json({ error: 'Correo o contraseña no válidos. La contraseña debe tener al menos 12 caracteres.' });
+  if (!displayName || !email || !EMAIL_PATTERN.test(email) || !password || password.length < 12) {
+    return response.status(400).json({ error: 'Nombre, correo o contraseña no válidos. La contraseña debe tener al menos 12 caracteres.' });
   }
 
-  const { data, error } = await createPublicSupabase(config).auth.signUp({ email, password });
+  const { data, error } = await createPublicSupabase(config).auth.signUp({
+    email,
+    password,
+    options: { data: { full_name: displayName } },
+  });
   if (error) return response.status(400).json({ error: 'No fue posible crear la cuenta.' });
   if (data.session) setSessionCookies(response, config, data.session);
   return response.status(data.session ? 201 : 202).json({
@@ -206,6 +226,33 @@ app.post('/api/auth/signout', asyncRoute(async (request, response) => {
   await revokeRequestSession(request, config);
   clearSessionCookies(response, config);
   return response.status(204).end();
+}));
+
+app.patch('/api/profile', asyncRoute(async (request, response) => {
+  const session = await getRequestSession(request, response, config);
+  if (!session || session.user.is_anonymous) return response.status(401).json({ error: 'Inicia sesión para editar tu perfil.' });
+
+  const displayName = normalizeText(request.body?.displayName, 100, { required: true });
+  if (!displayName) return response.status(400).json({ error: 'El nombre debe tener entre 1 y 100 caracteres.' });
+
+  const { data, error } = await session.client
+    .from('profiles')
+    .update({ display_name: displayName })
+    .eq('id', session.user.id)
+    .select('id,display_name,avatar_url,role')
+    .single();
+
+  if (error) return response.status(400).json({ error: 'No fue posible actualizar el perfil.' });
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({
+    profile: {
+      id: data.id,
+      displayName: data.display_name,
+      avatarUrl: data.avatar_url,
+      role: data.role,
+      isAdmin: data.role === 'admin' && Boolean(session.user.email_confirmed_at),
+    },
+  });
 }));
 
 app.get('/api/cart', asyncRoute(async (request, response) => {
@@ -389,6 +436,24 @@ app.patch('/api/admin/products/:productId', asyncRoute(async (request, response)
     .maybeSingle();
   if (error || !data) return response.status(404).json({ error: 'Producto no encontrado.' });
   return response.json({ product: data });
+}));
+
+app.get('/admin', asyncRoute(async (request, response) => {
+  const session = await getRequestSession(request, response, config);
+  if (!session || session.user.is_anonymous) {
+    return response.redirect(303, '/?auth=signin&next=%2Fadmin');
+  }
+
+  const profile = await getSessionProfile(session);
+  if (profile?.role !== 'admin' || !session.user.email_confirmed_at) {
+    return response.redirect(303, '/?notice=admin-required');
+  }
+
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': adminContentSecurityPolicy,
+  });
+  return response.type('html').send(adminHtml);
 }));
 
 app.use('/assets', express.static(ASSET_DIR, {

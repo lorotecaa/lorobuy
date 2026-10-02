@@ -19,7 +19,7 @@ The browser never receives a Supabase secret key. The API uses the low-privilege
 ## 1. Create and configure Supabase
 
 1. Create a Supabase project.
-2. In Auth settings, enable email/password authentication.
+2. In Auth settings, enable email/password authentication and require email confirmation.
 3. Enable Anonymous Sign-Ins. LoroBuy uses anonymous Supabase users for persistent pre-checkout carts; they can later be linked to a permanent identity.
 4. Apply the migrations in filename order with the Supabase CLI:
 
@@ -31,17 +31,9 @@ The browser never receives a Supabase secret key. The API uses the low-privilege
 
    Alternatively, run each migration in the Supabase SQL editor in filename order.
 
-5. Create a permanent user through Supabase Auth, then bootstrap the first administrator once in the SQL editor:
+5. Register and confirm `loroteca98@gmail.com`. Migration `202610020004_admin_role.sql` promotes only that confirmed identity to `profiles.role = 'admin'`. If the first three migrations were already applied, run only migration `202610020004_admin_role.sql` in the SQL Editor.
 
-   ```sql
-   update public.profiles
-   set role = 'admin'
-   where id = (
-     select id from auth.users where email = 'YOUR_ADMIN_EMAIL'
-   );
-   ```
-
-No API endpoint allows a user to promote their own role.
+The account icon opens registration, sign-in, profile editing, and sign-out. A confirmed administrator is redirected to `/admin`. Both the page route and every administrative API operation verify the authenticated profile on the server; RLS remains the final authorization boundary. No API endpoint or profile grant allows a user to modify `role`.
 
 ## 2. Product download files
 

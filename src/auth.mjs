@@ -51,6 +51,19 @@ async function sessionFromAccessToken(config, accessToken) {
   return { user: data.user, accessToken, client, session: null };
 }
 
+export async function getSessionProfile(session) {
+  if (!session || session.user.is_anonymous) return null;
+
+  const { data, error } = await session.client
+    .from('profiles')
+    .select('id,display_name,avatar_url,role')
+    .eq('id', session.user.id)
+    .maybeSingle();
+
+  if (error) throw new Error('Unable to read the authenticated profile from Supabase.');
+  return data ?? null;
+}
+
 export async function getRequestSession(request, response, config, { createAnonymous = false } = {}) {
   const cookies = parseCookies(request.get('cookie'));
   const existing = await sessionFromAccessToken(config, cookies[ACCESS_COOKIE]);
@@ -107,16 +120,10 @@ export async function revokeRequestSession(request, config) {
 
 export async function requireAdmin(request, response, config) {
   const session = await getRequestSession(request, response, config);
-  if (!session || session.user.is_anonymous) return null;
-
-  const { data, error } = await session.client
-    .from('profiles')
-    .select('role')
-    .eq('id', session.user.id)
-    .maybeSingle();
-
-  if (error || data?.role !== 'admin') return null;
-  return session;
+  if (!session || session.user.is_anonymous || !session.user.email_confirmed_at) return null;
+  const profile = await getSessionProfile(session);
+  if (profile?.role !== 'admin') return null;
+  return { ...session, profile };
 }
 
 export const cookieNames = Object.freeze({ access: ACCESS_COOKIE, refresh: REFRESH_COOKIE });

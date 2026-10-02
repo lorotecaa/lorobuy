@@ -49,9 +49,65 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     sort_order: 10,
     categories: { slug: 'quiereme', name: 'Animaciones Quiéreme', sort_order: 20, is_active: true },
   };
+  const adminUser = {
+    id: '22222222-2222-4222-8222-222222222222',
+    aud: 'authenticated',
+    role: 'authenticated',
+    email: 'loroteca98@gmail.com',
+    email_confirmed_at: '2026-10-02T12:00:00.000Z',
+    is_anonymous: false,
+    user_metadata: { full_name: 'Loro Admin' },
+  };
+  const customerUser = {
+    ...adminUser,
+    id: '33333333-3333-4333-8333-333333333333',
+    email: 'cliente@example.com',
+    user_metadata: { full_name: 'Cliente' },
+  };
+  let signupPayload;
+  let signinPayload;
+  const readJsonBody = async (request) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    return JSON.parse(body);
+  };
 
-  const supabaseMock = http.createServer((request, response) => {
+  const supabaseMock = http.createServer(async (request, response) => {
     assert.equal(request.headers.apikey, 'sb_publishable_mock');
+    if (request.method === 'POST' && request.url === '/auth/v1/signup') {
+      signupPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify(customerUser));
+    }
+    if (request.method === 'POST' && request.url === '/auth/v1/token?grant_type=password') {
+      signinPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({
+        access_token: 'signed-in-token',
+        refresh_token: 'refresh-token',
+        expires_in: 3600,
+        token_type: 'bearer',
+        user: customerUser,
+      }));
+    }
+    if (request.url === '/auth/v1/user') {
+      response.setHeader('Content-Type', 'application/json');
+      if (request.headers.authorization === 'Bearer admin-token') return response.end(JSON.stringify(adminUser));
+      if (request.headers.authorization === 'Bearer customer-token') return response.end(JSON.stringify(customerUser));
+      response.statusCode = 401;
+      return response.end(JSON.stringify({ message: 'invalid token' }));
+    }
+    if (request.url?.startsWith('/rest/v1/profiles')) {
+      response.setHeader('Content-Type', 'application/json');
+      if (request.headers.authorization === 'Bearer admin-token') {
+        return response.end(JSON.stringify({ id: adminUser.id, display_name: 'Loro Admin', avatar_url: null, role: 'admin' }));
+      }
+      if (request.headers.authorization === 'Bearer customer-token') {
+        return response.end(JSON.stringify({ id: customerUser.id, display_name: 'Cliente', avatar_url: null, role: 'customer' }));
+      }
+      response.statusCode = 401;
+      return response.end(JSON.stringify({ message: 'invalid token' }));
+    }
     if (request.url?.startsWith('/rest/v1/products')) {
       response.setHeader('Content-Range', '0-0/1');
       if (request.method === 'HEAD') return response.end();
@@ -98,6 +154,58 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   const catalog = await catalogResponse.json();
   assert.equal(catalog.products.length, 1);
   assert.equal(catalog.products[0].name, 'Mock Product');
+
+  const signupResponse = await fetch(`${appOrigin}/api/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ displayName: 'Cliente', email: 'cliente@example.com', password: 'StrongPass123!' }),
+  });
+  assert.equal(signupResponse.status, 202);
+  assert.deepEqual(await signupResponse.json(), { created: true, confirmationRequired: true });
+  assert.equal(signupPayload.data.full_name, 'Cliente');
+  assert.equal(signupPayload.email, 'cliente@example.com');
+
+  const signinResponse = await fetch(`${appOrigin}/api/auth/signin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ email: 'cliente@example.com', password: 'StrongPass123!' }),
+  });
+  assert.equal(signinResponse.status, 200);
+  assert.equal(signinPayload.email, 'cliente@example.com');
+  const signinCookies = signinResponse.headers.get('set-cookie') ?? '';
+  assert.match(signinCookies, /lorobuy_access=/);
+  assert.match(signinCookies, /lorobuy_refresh=/);
+  assert.match(signinCookies, /HttpOnly/);
+  assert.match(signinCookies, /SameSite=Lax/);
+
+  const anonymousAdminResponse = await fetch(`${appOrigin}/admin`, { redirect: 'manual' });
+  assert.equal(anonymousAdminResponse.status, 303);
+  assert.equal(anonymousAdminResponse.headers.get('location'), '/?auth=signin&next=%2Fadmin');
+
+  const customerAdminResponse = await fetch(`${appOrigin}/admin`, {
+    redirect: 'manual',
+    headers: { Cookie: 'lorobuy_access=customer-token' },
+  });
+  assert.equal(customerAdminResponse.status, 303);
+  assert.equal(customerAdminResponse.headers.get('location'), '/?notice=admin-required');
+
+  const adminPageResponse = await fetch(`${appOrigin}/admin`, {
+    headers: { Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(adminPageResponse.status, 200);
+  assert.match(await adminPageResponse.text(), /Panel administrativo protegido de LoroBuy/);
+  assert.match(adminPageResponse.headers.get('content-security-policy') ?? '', /connect-src 'self'/);
+  assert.equal(adminPageResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+
+  const adminSessionResponse = await fetch(`${appOrigin}/api/auth/session`, {
+    headers: { Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(adminSessionResponse.status, 200);
+  const adminSession = await adminSessionResponse.json();
+  assert.equal(adminSession.authenticated, true);
+  assert.equal(adminSession.user.email, 'loroteca98@gmail.com');
+  assert.equal(adminSession.user.role, 'admin');
+  assert.equal(adminSession.user.isAdmin, true);
 
   const crossOriginResponse = await fetch(`${appOrigin}/api/newsletter`, {
     method: 'POST',

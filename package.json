@@ -1,0 +1,21 @@
+{
+  "name": "lorobuy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "LoroBuy storefront backed by Supabase and prepared for Render.",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --watch src/server.mjs",
+    "start": "node src/server.mjs",
+    "test": "node --test test/project.test.mjs test/server.integration.test.mjs",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.117.2",
+    "express": "5.2.1",
+    "helmet": "8.3.0"
+  }
+}

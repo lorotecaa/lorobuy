@@ -10,9 +10,12 @@ import { createPublicSupabase } from './supabase.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
-const DIST_DIR = path.join(ROOT_DIR, 'dist');
-const ASSET_DIR = path.join(DIST_DIR, 'assets');
-const INDEX_FILE = path.join(DIST_DIR, 'index.html');
+const FRONTEND_BUILD_DIR = path.join(ROOT_DIR, 'dist');
+const ASSET_DIR = path.join(FRONTEND_BUILD_DIR, 'assets');
+const INDEX_FILE = path.join(FRONTEND_BUILD_DIR, 'index.html');
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(ASSET_DIR)) {
+  throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
+}
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
 const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml);
 const config = loadConfig();

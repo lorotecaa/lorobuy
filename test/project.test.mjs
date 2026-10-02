@@ -7,9 +7,12 @@ import { loadConfig } from '../src/config.mjs';
 import { buildContentSecurityPolicy } from '../src/security.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const html = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
+const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
 const configSource = fs.readFileSync(path.join(root, 'src', 'config.mjs'), 'utf8');
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const renderConfig = fs.readFileSync(path.join(root, 'render.yaml'), 'utf8');
 const schema = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020001_initial_schema.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
@@ -43,6 +46,15 @@ test('catalog and cart are loaded through the API, not local product arrays', ()
   assert.doesNotMatch(html, /const snipe\s*=/);
 });
 
+test('Render build and start commands produce the directory used by the server', () => {
+  assert.equal(packageJson.scripts.build, 'node scripts/build.mjs');
+  assert.equal(packageJson.scripts.start, 'node src/server.mjs');
+  assert.match(renderConfig, /buildCommand: npm ci && npm run build/);
+  assert.match(renderConfig, /startCommand: npm start/);
+  assert.match(server, /path\.join\(ROOT_DIR, 'dist'\)/);
+  assert.equal(builtHtml, html);
+});
+
 test('server uses only the Supabase publishable key', () => {
   const backendSource = `${server}\n${configSource}`;
   assert.match(backendSource, /SUPABASE_PUBLISHABLE_KEY/);
@@ -62,6 +74,6 @@ test('every application table enables RLS', () => {
 test('all referenced local assets exist', () => {
   const references = [...html.matchAll(/(?:src|href)="(assets\/[^"]+)"/g)].map((match) => match[1]);
   for (const reference of references) {
-    assert.equal(fs.existsSync(path.join(root, 'dist', reference)), true, reference);
+    assert.equal(fs.existsSync(path.join(root, 'frontend', reference)), true, reference);
   }
 });

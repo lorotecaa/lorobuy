@@ -6,7 +6,8 @@ Payments and third-party integrations are intentionally not implemented yet.
 
 ## Architecture
 
-- `dist/index.html` and `dist/assets/`: existing visual storefront and local presentation assets.
+- `frontend/index.html` and `frontend/assets/`: single source for the existing visual storefront.
+- `dist/`: generated frontend output; `npm run build` recreates it and it is not committed.
 - `src/server.mjs`: same-origin API and static delivery for Render.
 - `src/auth.mjs`: secure, HTTP-only Supabase Auth session cookies.
 - `supabase/migrations/`: database schema, RLS policies, initial catalog, and private Storage rules.
@@ -51,12 +52,19 @@ Customers can obtain a 60-second signed download URL only when a completed order
 ## 3. Deploy to Render
 
 1. Push this repository to the Git provider you will connect to Render.
-2. In Render, create a Blueprint from the repository. Render reads `render.yaml`.
+2. In Render, create a Blueprint from the repository. Render reads `render.yaml`, installs dependencies, and generates `dist/` from `frontend/`.
 3. Fill the three dashboard-managed variables:
    - `SUPABASE_URL`
    - `SUPABASE_PUBLISHABLE_KEY`
    - `APP_ORIGIN` — the exact Render URL, for example `https://lorobuy.onrender.com`
 4. Deploy. Render supplies `PORT` automatically and calls `/api/health`.
+
+Use these commands if the Render service is configured manually instead of through the Blueprint:
+
+```text
+Build Command: npm ci && npm run build
+Start Command: npm start
+```
 
 Do not add a Supabase secret key unless a future backend-only feature truly requires it. The current application deliberately works with the publishable key plus RLS.
 

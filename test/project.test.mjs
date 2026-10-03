@@ -86,6 +86,7 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(productHtml, /id="productVideo"/);
   assert.match(productHtml, /<video id="videoThumb"/);
   assert.match(productHtml, /videoThumb\.src=videoUrl/);
+  assert.match(productHtml, /videoThumb\.removeAttribute\('poster'\)/);
   assert.doesNotMatch(productHtml, /videoThumb\.src=imageUrl/);
   assert.match(productHtml, /controlslist="nodownload noremoteplayback"/);
   assert.match(productHtml, /id="descriptionTitle"/);

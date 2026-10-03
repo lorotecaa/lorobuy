@@ -83,6 +83,7 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(html, /article\.addEventListener\('pointerenter',play\)/);
   assert.match(html, /\/products\/\$\{encodeURIComponent\(product\.slug\)\}/);
   assert.match(productHtml, /id="productVideo"/);
+  assert.match(productHtml, /\.loading\[hidden\]\{display:none\}/);
   assert.match(productHtml, /fetch\(`\/api\/products\/\$\{encodeURIComponent\(slug\)\}`/);
   assert.match(productHtml, /data-add/);
   assert.match(server, /app\.get\('\/api\/products\/:slug'/);

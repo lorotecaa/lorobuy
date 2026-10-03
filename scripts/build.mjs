@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateStorefrontVideoQuality } from './video-quality.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceDirectory = path.join(root, 'frontend');
@@ -18,6 +19,11 @@ async function requirePath(target, label) {
 await requirePath(path.join(sourceDirectory, 'index.html'), 'Frontend entry point');
 await requirePath(path.join(sourceDirectory, 'product.html'), 'Product page entry point');
 await requirePath(path.join(sourceDirectory, 'assets'), 'Frontend assets directory');
+
+const checkedVideos = await validateStorefrontVideoQuality(sourceDirectory);
+for (const video of checkedVideos) {
+  console.log(`Verified Full HD video: ${path.relative(sourceDirectory, video.path)} (${video.width}x${video.height})`);
+}
 
 await fs.rm(stagingDirectory, { recursive: true, force: true });
 await fs.cp(sourceDirectory, stagingDirectory, { recursive: true, force: true });

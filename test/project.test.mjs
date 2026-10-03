@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import { buildContentSecurityPolicy } from '../src/security.mjs';
+import { assertFullHdDimensions, MIN_VIDEO_SHORT_EDGE, readMp4Dimensions } from '../scripts/video-quality.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
@@ -103,6 +104,13 @@ test('hero battle animates donations, time, progress, and round result', () => {
   assert.match(html, /const events=\{/);
   assert.match(html, /requestAnimationFrame\(animateBattle\)/);
   assert.match(html, /battleResult\.classList\.add\('show'\)/);
+});
+
+test('storefront video source meets the Full HD quality floor', async () => {
+  const dimensions = await readMp4Dimensions(path.join(root, 'frontend', 'assets', 'hero.mp4'));
+  assert.ok(Math.min(dimensions.width, dimensions.height) >= MIN_VIDEO_SHORT_EDGE);
+  assert.deepEqual(dimensions, { width: 1920, height: 1080 });
+  assert.throws(() => assertFullHdDimensions({ width: 960, height: 540 }, 'Low quality preview'), /requires at least 1080px/);
 });
 
 test('Render build and start commands produce the directory used by the server', () => {

@@ -16,6 +16,12 @@ Payments and third-party integrations are intentionally not implemented yet.
 
 The browser never receives a Supabase secret key. The API uses the low-privilege publishable key and forwards the signed-in user's JWT, so Supabase RLS remains the final authorization boundary.
 
+## Full HD product previews
+
+The storefront never resizes or recompresses videos during the build. The home hero and every MP4 placed in `frontend/assets/previews/` must have at least 1080 pixels on the short edge (`1920x1080` for landscape or `1080x1920` for portrait). `npm run build` inspects the MP4 metadata and fails before deployment when a video is smaller, corrupt, or missing its visual metadata.
+
+Name each product preview with the exact product slug followed by `.mp4`. For example, the preview for `mega-pack-dioses-nordicos` belongs at `frontend/assets/previews/mega-pack-dioses-nordicos.mp4`. The API discovers that file automatically; products without an individual preview use the verified Full HD `frontend/assets/hero.mp4` fallback. This rule applies to current and future catalog products without adding paths to the application code.
+
 ## 1. Create and configure Supabase
 
 1. Create a Supabase project.

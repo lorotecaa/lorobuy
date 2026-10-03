@@ -94,6 +94,17 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(server, /app\.get\('\/products\/:slug'/);
 });
 
+test('hero battle animates donations, time, progress, and round result', () => {
+  assert.match(html, /id="battleLeftScore"/);
+  assert.match(html, /id="battleRightScore"/);
+  assert.match(html, /id="battleTimer"/);
+  assert.match(html, /id="battleBar" role="progressbar"/);
+  assert.match(html, /--battle-share/);
+  assert.match(html, /const events=\{/);
+  assert.match(html, /requestAnimationFrame\(animateBattle\)/);
+  assert.match(html, /battleResult\.classList\.add\('show'\)/);
+});
+
 test('Render build and start commands produce the directory used by the server', () => {
   assert.equal(packageJson.scripts.build, 'node scripts/build.mjs');
   assert.equal(packageJson.scripts.start, 'node src/server.mjs');

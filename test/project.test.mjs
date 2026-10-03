@@ -84,6 +84,9 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(html, /article\.addEventListener\('pointerenter',play\)/);
   assert.match(html, /\/products\/\$\{encodeURIComponent\(product\.slug\)\}/);
   assert.match(productHtml, /id="productVideo"/);
+  assert.match(productHtml, /<video id="videoThumb"/);
+  assert.match(productHtml, /videoThumb\.src=videoUrl/);
+  assert.doesNotMatch(productHtml, /videoThumb\.src=imageUrl/);
   assert.match(productHtml, /controlslist="nodownload noremoteplayback"/);
   assert.match(productHtml, /id="descriptionTitle"/);
   assert.match(productHtml, /function productCopy\(item\)/);

@@ -9,8 +9,10 @@ import { buildContentSecurityPolicy } from '../src/security.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
 const adminHtml = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
+const authConfirmHtml = fs.readFileSync(path.join(root, 'frontend', 'auth-confirm.html'), 'utf8');
 const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
 const builtAdminHtml = fs.readFileSync(path.join(root, 'dist', 'admin.html'), 'utf8');
+const builtAuthConfirmHtml = fs.readFileSync(path.join(root, 'dist', 'auth-confirm.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
 const authSource = fs.readFileSync(path.join(root, 'src', 'auth.mjs'), 'utf8');
 const configSource = fs.readFileSync(path.join(root, 'src', 'config.mjs'), 'utf8');
@@ -35,15 +37,18 @@ test('production configuration requires HTTPS origins and Supabase URL', () => {
 test('CSP allows only the same-origin API and hashed inline code', () => {
   const policy = buildContentSecurityPolicy(html);
   const adminPolicy = buildContentSecurityPolicy(adminHtml);
+  const authConfirmPolicy = buildContentSecurityPolicy(authConfirmHtml);
   assert.equal(policy, buildContentSecurityPolicy(html.replace(/\r\n/g, '\n')));
   assert.match(policy, /connect-src 'self'/);
   assert.match(adminPolicy, /connect-src 'self'/);
+  assert.match(authConfirmPolicy, /connect-src 'self'/);
   assert.match(policy, /script-src 'sha256-[^']+' 'strict-dynamic'/);
   assert.match(policy, /style-src 'sha256-[^']+'/);
   assert.match(policy, /frame-ancestors 'none'/);
   assert.doesNotMatch(policy, /'unsafe-inline'/);
   assert.doesNotMatch(policy, /https:\/\/(?!placeholder)/);
   assert.doesNotMatch(adminPolicy, /'unsafe-inline'/);
+  assert.doesNotMatch(authConfirmPolicy, /'unsafe-inline'/);
 });
 
 test('account interface provides sign-in, registration, profile, and admin entry points', () => {
@@ -54,6 +59,8 @@ test('account interface provides sign-in, registration, profile, and admin entry
   assert.match(html, /href="\/admin"/);
   assert.match(html, /apiRequest\('\/api\/auth\/session'/);
   assert.match(html, /fetch\(url/);
+  assert.match(authConfirmHtml, /fetch\('\/api\/auth\/confirm'/);
+  assert.doesNotMatch(authConfirmHtml, /localStorage|sessionStorage/);
 });
 
 test('catalog and cart are loaded through the API, not local product arrays', () => {
@@ -72,6 +79,15 @@ test('Render build and start commands produce the directory used by the server',
   assert.match(server, /path\.join\(ROOT_DIR, 'dist'\)/);
   assert.equal(builtHtml, html);
   assert.equal(builtAdminHtml, adminHtml);
+  assert.equal(builtAuthConfirmHtml, authConfirmHtml);
+});
+
+test('email confirmation uses the configured public origin and a protected callback', () => {
+  assert.match(server, /emailRedirectTo: `\$\{config\.appOrigin\}\/auth\/confirm`/);
+  assert.match(server, /app\.post\('\/api\/auth\/resend-confirmation'/);
+  assert.match(server, /app\.post\('\/api\/auth\/confirm'/);
+  assert.match(server, /refreshSession\(\{ refresh_token: refreshToken \}\)/);
+  assert.match(server, /app\.get\('\/auth\/confirm'/);
 });
 
 test('server uses only the Supabase publishable key', () => {

@@ -13,7 +13,7 @@ import {
 } from './auth.mjs';
 import { loadConfig } from './config.mjs';
 import { buildContentSecurityPolicy, requireSameOrigin } from './security.mjs';
-import { createPublicSupabase } from './supabase.mjs';
+import { createPublicSupabase, createUserSupabase } from './supabase.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -21,13 +21,16 @@ const FRONTEND_BUILD_DIR = path.join(ROOT_DIR, 'dist');
 const ASSET_DIR = path.join(FRONTEND_BUILD_DIR, 'assets');
 const INDEX_FILE = path.join(FRONTEND_BUILD_DIR, 'index.html');
 const ADMIN_FILE = path.join(FRONTEND_BUILD_DIR, 'admin.html');
-if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(ASSET_DIR)) {
+const AUTH_CONFIRM_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-confirm.html');
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(ASSET_DIR)) {
   throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
 }
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
+const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
 const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml);
 const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml);
+const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
 const config = loadConfig();
 const publicSupabase = createPublicSupabase(config);
 const app = express();
@@ -44,8 +47,13 @@ app.use(helmet({
   xFrameOptions: { action: 'deny' },
 }));
 app.use((request, response, next) => {
+  const pageContentSecurityPolicy = request.path === '/admin'
+    ? adminContentSecurityPolicy
+    : request.path === '/auth/confirm'
+      ? authConfirmContentSecurityPolicy
+      : contentSecurityPolicy;
   response.set({
-    'Content-Security-Policy': request.path === '/admin' ? adminContentSecurityPolicy : contentSecurityPolicy,
+    'Content-Security-Policy': pageContentSecurityPolicy,
     'Permissions-Policy': 'accelerometer=(), autoplay=(self), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), fullscreen=(self), gamepad=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), xr-spatial-tracking=()',
     'X-DNS-Prefetch-Control': 'off',
     'X-Permitted-Cross-Domain-Policies': 'none',
@@ -199,7 +207,10 @@ app.post('/api/auth/signup', asyncRoute(async (request, response) => {
   const { data, error } = await createPublicSupabase(config).auth.signUp({
     email,
     password,
-    options: { data: { full_name: displayName } },
+    options: {
+      data: { full_name: displayName },
+      emailRedirectTo: `${config.appOrigin}/auth/confirm`,
+    },
   });
   if (error) return response.status(400).json({ error: 'No fue posible crear la cuenta.' });
   if (data.session) setSessionCookies(response, config, data.session);
@@ -207,6 +218,39 @@ app.post('/api/auth/signup', asyncRoute(async (request, response) => {
     created: true,
     confirmationRequired: !data.session,
   });
+}));
+
+app.post('/api/auth/resend-confirmation', asyncRoute(async (request, response) => {
+  const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
+  if (!email || !EMAIL_PATTERN.test(email)) return response.status(400).json({ error: 'Correo electrónico no válido.' });
+
+  await createPublicSupabase(config).auth.resend({
+    type: 'signup',
+    email,
+    options: { emailRedirectTo: `${config.appOrigin}/auth/confirm` },
+  });
+  return response.status(202).json({ accepted: true });
+}));
+
+app.post('/api/auth/confirm', asyncRoute(async (request, response) => {
+  const refreshToken = normalizeText(request.body?.refreshToken, 4096, { required: true });
+  if (!refreshToken) return response.status(400).json({ error: 'El enlace de confirmación no es válido.' });
+
+  const publicClient = createPublicSupabase(config);
+  const { data, error } = await publicClient.auth.refreshSession({ refresh_token: refreshToken });
+  if (error || !data.session || !data.user?.email_confirmed_at) {
+    return response.status(401).json({ error: 'El enlace de confirmación venció o ya no es válido.' });
+  }
+
+  const session = {
+    user: data.user,
+    accessToken: data.session.access_token,
+    client: createUserSupabase(config, data.session.access_token),
+    session: data.session,
+  };
+  const profile = await getSessionProfile(session);
+  setSessionCookies(response, config, data.session);
+  return response.json({ authenticated: true, isAdmin: profile?.role === 'admin' });
 }));
 
 app.post('/api/auth/signin', asyncRoute(async (request, response) => {
@@ -455,6 +499,14 @@ app.get('/admin', asyncRoute(async (request, response) => {
   });
   return response.type('html').send(adminHtml);
 }));
+
+app.get('/auth/confirm', (_request, response) => {
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': authConfirmContentSecurityPolicy,
+  });
+  response.type('html').send(authConfirmHtml);
+});
 
 app.use('/assets', express.static(ASSET_DIR, {
   dotfiles: 'deny',

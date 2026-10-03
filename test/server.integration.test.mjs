@@ -65,6 +65,9 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     user_metadata: { full_name: 'Cliente' },
   };
   let signupPayload;
+  let signupRequestUrl;
+  let resendPayload;
+  let resendRequestUrl;
   let signinPayload;
   const readJsonBody = async (request) => {
     let body = '';
@@ -74,10 +77,17 @@ test('Render server serves the unchanged storefront and reads catalog data from 
 
   const supabaseMock = http.createServer(async (request, response) => {
     assert.equal(request.headers.apikey, 'sb_publishable_mock');
-    if (request.method === 'POST' && request.url === '/auth/v1/signup') {
+    if (request.method === 'POST' && request.url?.startsWith('/auth/v1/signup')) {
+      signupRequestUrl = request.url;
       signupPayload = await readJsonBody(request);
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify(customerUser));
+    }
+    if (request.method === 'POST' && request.url?.startsWith('/auth/v1/resend')) {
+      resendRequestUrl = request.url;
+      resendPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({}));
     }
     if (request.method === 'POST' && request.url === '/auth/v1/token?grant_type=password') {
       signinPayload = await readJsonBody(request);
@@ -90,10 +100,27 @@ test('Render server serves the unchanged storefront and reads catalog data from 
         user: customerUser,
       }));
     }
+    if (request.method === 'POST' && request.url === '/auth/v1/token?grant_type=refresh_token') {
+      const payload = await readJsonBody(request);
+      if (payload.refresh_token !== 'confirmation-refresh-token') {
+        response.statusCode = 401;
+        response.setHeader('Content-Type', 'application/json');
+        return response.end(JSON.stringify({ message: 'invalid refresh token' }));
+      }
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({
+        access_token: 'confirmed-access-token',
+        refresh_token: 'confirmed-refresh-token',
+        expires_in: 3600,
+        token_type: 'bearer',
+        user: customerUser,
+      }));
+    }
     if (request.url === '/auth/v1/user') {
       response.setHeader('Content-Type', 'application/json');
       if (request.headers.authorization === 'Bearer admin-token') return response.end(JSON.stringify(adminUser));
       if (request.headers.authorization === 'Bearer customer-token') return response.end(JSON.stringify(customerUser));
+      if (request.headers.authorization === 'Bearer confirmed-access-token') return response.end(JSON.stringify(customerUser));
       response.statusCode = 401;
       return response.end(JSON.stringify({ message: 'invalid token' }));
     }
@@ -103,6 +130,9 @@ test('Render server serves the unchanged storefront and reads catalog data from 
         return response.end(JSON.stringify({ id: adminUser.id, display_name: 'Loro Admin', avatar_url: null, role: 'admin' }));
       }
       if (request.headers.authorization === 'Bearer customer-token') {
+        return response.end(JSON.stringify({ id: customerUser.id, display_name: 'Cliente', avatar_url: null, role: 'customer' }));
+      }
+      if (request.headers.authorization === 'Bearer confirmed-access-token') {
         return response.end(JSON.stringify({ id: customerUser.id, display_name: 'Cliente', avatar_url: null, role: 'customer' }));
       }
       response.statusCode = 401;
@@ -164,6 +194,35 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.deepEqual(await signupResponse.json(), { created: true, confirmationRequired: true });
   assert.equal(signupPayload.data.full_name, 'Cliente');
   assert.equal(signupPayload.email, 'cliente@example.com');
+  assert.equal(new URL(signupRequestUrl, appOrigin).searchParams.get('redirect_to'), `${appOrigin}/auth/confirm`);
+
+  const resendResponse = await fetch(`${appOrigin}/api/auth/resend-confirmation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ email: 'cliente@example.com' }),
+  });
+  assert.equal(resendResponse.status, 202);
+  assert.deepEqual(await resendResponse.json(), { accepted: true });
+  assert.equal(resendPayload.email, 'cliente@example.com');
+  assert.equal(resendPayload.type, 'signup');
+  assert.equal(new URL(resendRequestUrl, appOrigin).searchParams.get('redirect_to'), `${appOrigin}/auth/confirm`);
+
+  const confirmationPageResponse = await fetch(`${appOrigin}/auth/confirm`);
+  assert.equal(confirmationPageResponse.status, 200);
+  assert.match(await confirmationPageResponse.text(), /Confirmando tu correo/);
+  assert.match(confirmationPageResponse.headers.get('content-security-policy') ?? '', /connect-src 'self'/);
+  assert.equal(confirmationPageResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+
+  const confirmationResponse = await fetch(`${appOrigin}/api/auth/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ refreshToken: 'confirmation-refresh-token' }),
+  });
+  assert.equal(confirmationResponse.status, 200);
+  assert.deepEqual(await confirmationResponse.json(), { authenticated: true, isAdmin: false });
+  const confirmationCookies = confirmationResponse.headers.get('set-cookie') ?? '';
+  assert.match(confirmationCookies, /lorobuy_access=confirmed-access-token/);
+  assert.match(confirmationCookies, /lorobuy_refresh=confirmed-refresh-token/);
 
   const signinResponse = await fetch(`${appOrigin}/api/auth/signin`, {
     method: 'POST',

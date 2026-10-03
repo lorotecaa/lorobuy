@@ -20,8 +20,12 @@ The browser never receives a Supabase secret key. The API uses the low-privilege
 
 1. Create a Supabase project.
 2. In Auth settings, enable email/password authentication and require email confirmation.
-3. Enable Anonymous Sign-Ins. LoroBuy uses anonymous Supabase users for persistent pre-checkout carts; they can later be linked to a permanent identity.
-4. Apply the migrations in filename order with the Supabase CLI:
+3. In **Authentication → URL Configuration**, set:
+   - **Site URL** to the exact public value of `APP_ORIGIN`, for example `https://lorobuy.onrender.com`.
+   - **Redirect URLs** to that same origin followed by `/auth/confirm`, for example `https://lorobuy.onrender.com/auth/confirm`.
+   Supabase ignores a redirect that is not allow-listed and otherwise falls back to its Site URL, whose default is `http://localhost:3000`.
+4. Enable Anonymous Sign-Ins. LoroBuy uses anonymous Supabase users for persistent pre-checkout carts; they can later be linked to a permanent identity.
+5. Apply the migrations in filename order with the Supabase CLI:
 
    ```powershell
    supabase login
@@ -31,7 +35,9 @@ The browser never receives a Supabase secret key. The API uses the low-privilege
 
    Alternatively, run each migration in the Supabase SQL editor in filename order.
 
-5. Register and confirm `loroteca98@gmail.com`. Migration `202610020004_admin_role.sql` promotes only that confirmed identity to `profiles.role = 'admin'`. If the first three migrations were already applied, run only migration `202610020004_admin_role.sql` in the SQL Editor.
+6. Register and confirm `loroteca98@gmail.com`. Migration `202610020004_admin_role.sql` promotes only that confirmed identity to `profiles.role = 'admin'`. If the first three migrations were already applied, run only migration `202610020004_admin_role.sql` in the SQL Editor.
+
+LoroBuy sends every new confirmation to `${APP_ORIGIN}/auth/confirm`. That page exchanges the short-lived confirmation session for secure, HTTP-only cookies and immediately removes the tokens from the browser address. Confirmation links already issued with `localhost:3000`, or links that have expired, cannot be repaired; after correcting the URL Configuration, enter the address in **Iniciar sesión** and use **Reenviar correo de confirmación**.
 
 The account icon opens registration, sign-in, profile editing, and sign-out. A confirmed administrator is redirected to `/admin`. Both the page route and every administrative API operation verify the authenticated profile on the server; RLS remains the final authorization boundary. No API endpoint or profile grant allows a user to modify `role`.
 

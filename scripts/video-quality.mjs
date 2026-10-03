@@ -1,12 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export const MIN_VIDEO_SHORT_EDGE = 1080;
+export const MIN_VIDEO_HEIGHT = 1080;
+export const MIN_PORTRAIT_WIDTH = 600;
+export const MIN_LANDSCAPE_WIDTH = 1920;
 
-export function assertFullHdDimensions(dimensions, label = 'Video') {
-  const shortEdge = Math.min(dimensions.width, dimensions.height);
-  if (!Number.isFinite(shortEdge) || shortEdge < MIN_VIDEO_SHORT_EDGE) {
-    throw new Error(`${label} is ${dimensions.width}x${dimensions.height}. LoroBuy requires at least ${MIN_VIDEO_SHORT_EDGE}px on the short edge.`);
+export function assertHighDefinitionDimensions(dimensions, label = 'Video') {
+  const { width, height } = dimensions;
+  const portraitOrSquare = height >= width;
+  const validPortrait = portraitOrSquare && width >= MIN_PORTRAIT_WIDTH && height >= MIN_VIDEO_HEIGHT;
+  const validLandscape = !portraitOrSquare && width >= MIN_LANDSCAPE_WIDTH && height >= MIN_VIDEO_HEIGHT;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || (!validPortrait && !validLandscape)) {
+    throw new Error(`${label} is ${width}x${height}. LoroBuy requires at least ${MIN_PORTRAIT_WIDTH}x${MIN_VIDEO_HEIGHT} for portrait video or ${MIN_LANDSCAPE_WIDTH}x${MIN_VIDEO_HEIGHT} for landscape video.`);
   }
 }
 
@@ -89,7 +94,7 @@ export async function validateStorefrontVideoQuality(frontendDirectory) {
       throw new Error(`Unable to inspect video ${path.relative(frontendDirectory, videoPath)}: ${error.message}`);
     }
 
-    assertFullHdDimensions(dimensions, `Video ${path.relative(frontendDirectory, videoPath)}`);
+    assertHighDefinitionDimensions(dimensions, `Video ${path.relative(frontendDirectory, videoPath)}`);
     results.push({ path: videoPath, ...dimensions });
   }
 

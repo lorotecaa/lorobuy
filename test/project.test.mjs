@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import { buildContentSecurityPolicy } from '../src/security.mjs';
-import { assertFullHdDimensions, MIN_VIDEO_SHORT_EDGE, readMp4Dimensions } from '../scripts/video-quality.mjs';
+import { assertHighDefinitionDimensions, readMp4Dimensions } from '../scripts/video-quality.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
@@ -106,11 +106,14 @@ test('hero battle animates donations, time, progress, and round result', () => {
   assert.match(html, /battleResult\.classList\.add\('show'\)/);
 });
 
-test('storefront video source meets the Full HD quality floor', async () => {
+test('storefront videos meet the display quality floor', async () => {
   const dimensions = await readMp4Dimensions(path.join(root, 'frontend', 'assets', 'hero.mp4'));
-  assert.ok(Math.min(dimensions.width, dimensions.height) >= MIN_VIDEO_SHORT_EDGE);
+  const nordicPreview = await readMp4Dimensions(path.join(root, 'frontend', 'assets', 'previews', 'mega-pack-dioses-nordicos.mp4'));
   assert.deepEqual(dimensions, { width: 1920, height: 1080 });
-  assert.throws(() => assertFullHdDimensions({ width: 960, height: 540 }, 'Low quality preview'), /requires at least 1080px/);
+  assert.deepEqual(nordicPreview, { width: 606, height: 1080 });
+  assert.doesNotThrow(() => assertHighDefinitionDimensions({ width: 606, height: 1080 }, 'Portrait preview'));
+  assert.throws(() => assertHighDefinitionDimensions({ width: 960, height: 540 }, 'Low quality preview'), /requires at least/);
+  assert.throws(() => assertHighDefinitionDimensions({ width: 1280, height: 720 }, 'Low quality landscape'), /requires at least/);
 });
 
 test('Render build and start commands produce the directory used by the server', () => {

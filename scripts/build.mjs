@@ -16,11 +16,13 @@ async function requirePath(target, label) {
 }
 
 await requirePath(path.join(sourceDirectory, 'index.html'), 'Frontend entry point');
+await requirePath(path.join(sourceDirectory, 'product.html'), 'Product page entry point');
 await requirePath(path.join(sourceDirectory, 'assets'), 'Frontend assets directory');
 
 await fs.rm(stagingDirectory, { recursive: true, force: true });
 await fs.cp(sourceDirectory, stagingDirectory, { recursive: true, force: true });
 await requirePath(path.join(stagingDirectory, 'index.html'), 'Generated frontend entry point');
+await requirePath(path.join(stagingDirectory, 'product.html'), 'Generated product page entry point');
 await requirePath(path.join(stagingDirectory, 'assets'), 'Generated frontend assets directory');
 
 await fs.rm(outputDirectory, { recursive: true, force: true });

@@ -191,6 +191,21 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   const catalog = await catalogResponse.json();
   assert.equal(catalog.products.length, 1);
   assert.equal(catalog.products[0].name, 'Mock Product');
+  assert.equal(catalog.products[0].previewPath, 'assets/hero.mp4');
+
+  const productApiResponse = await fetch(`${appOrigin}/api/products/mock-product`);
+  assert.equal(productApiResponse.status, 200);
+  const productApi = await productApiResponse.json();
+  assert.equal(productApi.product.slug, 'mock-product');
+  assert.equal(productApi.product.previewPath, 'assets/hero.mp4');
+
+  const productPageResponse = await fetch(`${appOrigin}/products/mock-product`);
+  assert.equal(productPageResponse.status, 200);
+  assert.match(await productPageResponse.text(), /Detalle del producto LoroBuy/);
+  assert.match(productPageResponse.headers.get('content-security-policy') ?? '', /connect-src 'self'/);
+
+  const invalidProductPageResponse = await fetch(`${appOrigin}/products/INVALID!`);
+  assert.equal(invalidProductPageResponse.status, 404);
 
   const shortPasswordResponse = await fetch(`${appOrigin}/api/auth/signup`, {
     method: 'POST',

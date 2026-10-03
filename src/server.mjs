@@ -20,15 +20,18 @@ const ROOT_DIR = path.resolve(__dirname, '..');
 const FRONTEND_BUILD_DIR = path.join(ROOT_DIR, 'dist');
 const ASSET_DIR = path.join(FRONTEND_BUILD_DIR, 'assets');
 const INDEX_FILE = path.join(FRONTEND_BUILD_DIR, 'index.html');
+const PRODUCT_FILE = path.join(FRONTEND_BUILD_DIR, 'product.html');
 const ADMIN_FILE = path.join(FRONTEND_BUILD_DIR, 'admin.html');
 const AUTH_CONFIRM_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-confirm.html');
-if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(ASSET_DIR)) {
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(ASSET_DIR)) {
   throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
 }
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
+const productHtml = fs.readFileSync(PRODUCT_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
 const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml);
+const productContentSecurityPolicy = buildContentSecurityPolicy(productHtml);
 const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml);
 const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
 const config = loadConfig();
@@ -51,7 +54,9 @@ app.use((request, response, next) => {
     ? adminContentSecurityPolicy
     : request.path === '/auth/confirm'
       ? authConfirmContentSecurityPolicy
-      : contentSecurityPolicy;
+      : request.path.startsWith('/products/')
+        ? productContentSecurityPolicy
+        : contentSecurityPolicy;
   response.set({
     'Content-Security-Policy': pageContentSecurityPolicy,
     'Permissions-Policy': 'accelerometer=(), autoplay=(self), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), fullscreen=(self), gamepad=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), xr-spatial-tracking=()',
@@ -119,12 +124,17 @@ function publicSignupError(error) {
 }
 
 function publicProduct(row) {
+  const previewCandidate = `assets/previews/${row.slug}.mp4`;
+  const previewPath = SLUG_PATTERN.test(row.slug) && fs.existsSync(path.join(FRONTEND_BUILD_DIR, previewCandidate))
+    ? previewCandidate
+    : 'assets/hero.mp4';
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
     description: row.description,
     imagePath: IMAGE_PATTERN.test(row.image_path) ? row.image_path : 'assets/favicon.png',
+    previewPath,
     priceCents: row.price_cents,
     compareAtPriceCents: row.compare_at_price_cents,
     currency: row.currency,
@@ -196,6 +206,24 @@ app.get('/api/products', asyncRoute(async (_request, response) => {
   if (error) throw new Error('Unable to load products from Supabase.');
   response.set('Cache-Control', 'public, max-age=30, s-maxage=60');
   return response.json({ products: (data ?? []).map(publicProduct) });
+}));
+
+app.get('/api/products/:slug', asyncRoute(async (request, response) => {
+  const slug = normalizeText(request.params.slug, 80, { required: true });
+  if (!slug || !SLUG_PATTERN.test(slug)) return response.status(404).json({ error: 'Producto no encontrado.' });
+
+  const { data, error } = await publicSupabase
+    .from('products')
+    .select('id,slug,name,description,image_path,price_cents,compare_at_price_cents,currency,sort_order,categories!inner(slug,name,sort_order,is_active)')
+    .eq('slug', slug)
+    .eq('is_active', true)
+    .eq('categories.is_active', true)
+    .limit(1);
+
+  if (error) throw new Error('Unable to load product from Supabase.');
+  if (!data?.[0]) return response.status(404).json({ error: 'Producto no encontrado.' });
+  response.set('Cache-Control', 'public, max-age=30, s-maxage=60');
+  return response.json({ product: publicProduct(data[0]) });
 }));
 
 app.get('/api/auth/session', asyncRoute(async (request, response) => {
@@ -562,6 +590,15 @@ app.use('/assets', express.static(ASSET_DIR, {
 app.get(['/', '/index.html'], (_request, response) => {
   response.set('Cache-Control', 'private, no-store, max-age=0');
   response.type('html').send(storefrontHtml);
+});
+
+app.get('/products/:slug', (request, response) => {
+  if (!SLUG_PATTERN.test(request.params.slug)) return response.status(404).type('text').send('Página no encontrada');
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': productContentSecurityPolicy,
+  });
+  return response.type('html').send(productHtml);
 });
 
 app.use('/api', (_request, response) => response.status(404).json({ error: 'Endpoint no encontrado.' }));

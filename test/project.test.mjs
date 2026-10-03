@@ -8,9 +8,11 @@ import { buildContentSecurityPolicy } from '../src/security.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
+const productHtml = fs.readFileSync(path.join(root, 'frontend', 'product.html'), 'utf8');
 const adminHtml = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
 const authConfirmHtml = fs.readFileSync(path.join(root, 'frontend', 'auth-confirm.html'), 'utf8');
 const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
+const builtProductHtml = fs.readFileSync(path.join(root, 'dist', 'product.html'), 'utf8');
 const builtAdminHtml = fs.readFileSync(path.join(root, 'dist', 'admin.html'), 'utf8');
 const builtAuthConfirmHtml = fs.readFileSync(path.join(root, 'dist', 'auth-confirm.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
@@ -36,10 +38,12 @@ test('production configuration requires HTTPS origins and Supabase URL', () => {
 
 test('CSP allows only the same-origin API and hashed inline code', () => {
   const policy = buildContentSecurityPolicy(html);
+  const productPolicy = buildContentSecurityPolicy(productHtml);
   const adminPolicy = buildContentSecurityPolicy(adminHtml);
   const authConfirmPolicy = buildContentSecurityPolicy(authConfirmHtml);
   assert.equal(policy, buildContentSecurityPolicy(html.replace(/\r\n/g, '\n')));
   assert.match(policy, /connect-src 'self'/);
+  assert.match(productPolicy, /connect-src 'self'/);
   assert.match(adminPolicy, /connect-src 'self'/);
   assert.match(authConfirmPolicy, /connect-src 'self'/);
   assert.match(policy, /script-src 'sha256-[^']+' 'strict-dynamic'/);
@@ -47,6 +51,7 @@ test('CSP allows only the same-origin API and hashed inline code', () => {
   assert.match(policy, /frame-ancestors 'none'/);
   assert.doesNotMatch(policy, /'unsafe-inline'/);
   assert.doesNotMatch(policy, /https:\/\/(?!placeholder)/);
+  assert.doesNotMatch(productPolicy, /'unsafe-inline'/);
   assert.doesNotMatch(adminPolicy, /'unsafe-inline'/);
   assert.doesNotMatch(authConfirmPolicy, /'unsafe-inline'/);
 });
@@ -73,6 +78,17 @@ test('catalog and cart are loaded through the API, not local product arrays', ()
   assert.doesNotMatch(html, /const snipe\s*=/);
 });
 
+test('catalog cards preview video on hover and open a dedicated product page', () => {
+  assert.match(html, /make\('video','card-preview'\)/);
+  assert.match(html, /article\.addEventListener\('pointerenter',play\)/);
+  assert.match(html, /\/products\/\$\{encodeURIComponent\(product\.slug\)\}/);
+  assert.match(productHtml, /id="productVideo"/);
+  assert.match(productHtml, /fetch\(`\/api\/products\/\$\{encodeURIComponent\(slug\)\}`/);
+  assert.match(productHtml, /data-add/);
+  assert.match(server, /app\.get\('\/api\/products\/:slug'/);
+  assert.match(server, /app\.get\('\/products\/:slug'/);
+});
+
 test('Render build and start commands produce the directory used by the server', () => {
   assert.equal(packageJson.scripts.build, 'node scripts/build.mjs');
   assert.equal(packageJson.scripts.start, 'node src/server.mjs');
@@ -80,6 +96,7 @@ test('Render build and start commands produce the directory used by the server',
   assert.match(renderConfig, /startCommand: npm start/);
   assert.match(server, /path\.join\(ROOT_DIR, 'dist'\)/);
   assert.equal(builtHtml, html);
+  assert.equal(builtProductHtml, productHtml);
   assert.equal(builtAdminHtml, adminHtml);
   assert.equal(builtAuthConfirmHtml, authConfirmHtml);
 });
@@ -122,7 +139,7 @@ test('admin access is enforced by confirmed Supabase identity, backend role chec
 });
 
 test('all referenced local assets exist', () => {
-  const references = [...`${html}\n${adminHtml}`.matchAll(/(?:src|href)="(assets\/[^"]+)"/g)].map((match) => match[1]);
+  const references = [...`${html}\n${productHtml}\n${adminHtml}`.matchAll(/(?:src|href)="\/?(assets\/[^"]+)"/g)].map((match) => match[1]);
   for (const reference of references) {
     assert.equal(fs.existsSync(path.join(root, 'frontend', reference)), true, reference);
   }

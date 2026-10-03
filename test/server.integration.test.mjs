@@ -192,12 +192,14 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(catalog.products.length, 1);
   assert.equal(catalog.products[0].name, 'Mock Product');
   assert.equal(catalog.products[0].previewPath, 'assets/hero.mp4');
+  assert.equal(catalog.products[0].previewThumbnailPath, 'assets/genio.webp');
 
   const productApiResponse = await fetch(`${appOrigin}/api/products/mock-product`);
   assert.equal(productApiResponse.status, 200);
   const productApi = await productApiResponse.json();
   assert.equal(productApi.product.slug, 'mock-product');
   assert.equal(productApi.product.previewPath, 'assets/hero.mp4');
+  assert.equal(productApi.product.previewThumbnailPath, 'assets/genio.webp');
 
   const productPageResponse = await fetch(`${appOrigin}/products/mock-product`);
   assert.equal(productPageResponse.status, 200);

@@ -125,16 +125,22 @@ function publicSignupError(error) {
 
 function publicProduct(row) {
   const previewCandidate = `assets/previews/${row.slug}.mp4`;
+  const previewThumbnailCandidate = `assets/previews/${row.slug}-thumb.jpg`;
   const previewPath = SLUG_PATTERN.test(row.slug) && fs.existsSync(path.join(FRONTEND_BUILD_DIR, previewCandidate))
     ? previewCandidate
     : 'assets/hero.mp4';
+  const imagePath = IMAGE_PATTERN.test(row.image_path) ? row.image_path : 'assets/favicon.png';
+  const previewThumbnailPath = SLUG_PATTERN.test(row.slug) && fs.existsSync(path.join(FRONTEND_BUILD_DIR, previewThumbnailCandidate))
+    ? previewThumbnailCandidate
+    : imagePath;
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
     description: row.description,
-    imagePath: IMAGE_PATTERN.test(row.image_path) ? row.image_path : 'assets/favicon.png',
+    imagePath,
     previewPath,
+    previewThumbnailPath,
     priceCents: row.price_cents,
     compareAtPriceCents: row.compare_at_price_cents,
     currency: row.currency,

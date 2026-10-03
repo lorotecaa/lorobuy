@@ -83,6 +83,10 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(html, /article\.addEventListener\('pointerenter',play\)/);
   assert.match(html, /\/products\/\$\{encodeURIComponent\(product\.slug\)\}/);
   assert.match(productHtml, /id="productVideo"/);
+  assert.match(productHtml, /controlslist="nodownload noremoteplayback"/);
+  assert.match(productHtml, /id="descriptionTitle"/);
+  assert.match(productHtml, /function productCopy\(item\)/);
+  assert.match(productHtml, /grid-template-columns:minmax\(0,548px\) minmax\(350px,400px\)/);
   assert.match(productHtml, /\.loading\[hidden\]\{display:none\}/);
   assert.match(productHtml, /fetch\(`\/api\/products\/\$\{encodeURIComponent\(slug\)\}`/);
   assert.match(productHtml, /data-add/);

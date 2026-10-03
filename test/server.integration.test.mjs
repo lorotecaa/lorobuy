@@ -81,6 +81,13 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       signupRequestUrl = request.url;
       signupPayload = await readJsonBody(request);
       response.setHeader('Content-Type', 'application/json');
+      if (signupPayload.email === 'limited@example.com') {
+        response.statusCode = 429;
+        return response.end(JSON.stringify({
+          code: 'over_email_send_rate_limit',
+          msg: 'Email rate limit exceeded',
+        }));
+      }
       return response.end(JSON.stringify(customerUser));
     }
     if (request.method === 'POST' && request.url?.startsWith('/auth/v1/resend')) {
@@ -195,6 +202,16 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(signupPayload.data.full_name, 'Cliente');
   assert.equal(signupPayload.email, 'cliente@example.com');
   assert.equal(new URL(signupRequestUrl, appOrigin).searchParams.get('redirect_to'), `${appOrigin}/auth/confirm`);
+
+  const limitedSignupResponse = await fetch(`${appOrigin}/api/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ displayName: 'Limited', email: 'limited@example.com', password: 'StrongPass123!' }),
+  });
+  assert.equal(limitedSignupResponse.status, 429);
+  assert.deepEqual(await limitedSignupResponse.json(), {
+    error: 'Supabase alcanzó temporalmente el límite de correos. Espera antes de volver a intentarlo.',
+  });
 
   const resendResponse = await fetch(`${appOrigin}/api/auth/resend-confirmation`, {
     method: 'POST',

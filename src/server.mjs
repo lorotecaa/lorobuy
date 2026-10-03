@@ -90,6 +90,33 @@ function normalizeText(value, maximumLength, { required = false } = {}) {
   return normalized;
 }
 
+function publicSignupError(error) {
+  const code = typeof error?.code === 'string' ? error.code : '';
+  const status = Number(error?.status);
+  if (status === 429 || code === 'over_email_send_rate_limit' || code === 'over_request_rate_limit') {
+    return {
+      status: 429,
+      message: 'Supabase alcanzó temporalmente el límite de correos. Espera antes de volver a intentarlo.',
+    };
+  }
+  if (code === 'weak_password') {
+    return {
+      status: 400,
+      message: 'La contraseña no cumple los requisitos de seguridad. Usa mayúsculas, minúsculas, números y símbolos.',
+    };
+  }
+  if (code === 'signup_disabled') {
+    return { status: 403, message: 'El registro de nuevas cuentas está desactivado temporalmente.' };
+  }
+  if (code === 'email_address_not_authorized') {
+    return { status: 503, message: 'El servicio de correo todavía no está configurado para esta dirección.' };
+  }
+  if (status >= 500 || code === 'unexpected_failure') {
+    return { status: 503, message: 'Supabase no pudo preparar la cuenta. Inténtalo nuevamente más tarde.' };
+  }
+  return { status: 400, message: 'No fue posible crear la cuenta.' };
+}
+
 function publicProduct(row) {
   return {
     id: row.id,
@@ -212,7 +239,16 @@ app.post('/api/auth/signup', asyncRoute(async (request, response) => {
       emailRedirectTo: `${config.appOrigin}/auth/confirm`,
     },
   });
-  if (error) return response.status(400).json({ error: 'No fue posible crear la cuenta.' });
+  if (error) {
+    const publicError = publicSignupError(error);
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'auth_signup_failed',
+      code: error.code ?? null,
+      status: error.status ?? null,
+    }));
+    return response.status(publicError.status).json({ error: publicError.message });
+  }
   if (data.session) setSessionCookies(response, config, data.session);
   return response.status(data.session ? 201 : 202).json({
     created: true,
@@ -224,11 +260,14 @@ app.post('/api/auth/resend-confirmation', asyncRoute(async (request, response) =
   const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
   if (!email || !EMAIL_PATTERN.test(email)) return response.status(400).json({ error: 'Correo electrónico no válido.' });
 
-  await createPublicSupabase(config).auth.resend({
+  const { error } = await createPublicSupabase(config).auth.resend({
     type: 'signup',
     email,
     options: { emailRedirectTo: `${config.appOrigin}/auth/confirm` },
   });
+  if (error && (error.status === 429 || error.code === 'over_email_send_rate_limit' || error.code === 'over_request_rate_limit')) {
+    return response.status(429).json({ error: 'Supabase alcanzó temporalmente el límite de correos. Espera antes de solicitar otro.' });
+  }
   return response.status(202).json({ accepted: true });
 }));
 

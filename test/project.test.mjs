@@ -157,6 +157,7 @@ test('admin access is enforced by confirmed Supabase identity, backend role chec
 test('all referenced local assets exist', () => {
   const references = [...`${html}\n${productHtml}\n${adminHtml}`.matchAll(/(?:src|href)="\/?(assets\/[^"]+)"/g)].map((match) => match[1]);
   for (const reference of references) {
-    assert.equal(fs.existsSync(path.join(root, 'frontend', reference)), true, reference);
+    const assetPath = reference.split(/[?#]/, 1)[0];
+    assert.equal(fs.existsSync(path.join(root, 'frontend', assetPath)), true, reference);
   }
 });

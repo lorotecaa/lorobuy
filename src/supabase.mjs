@@ -22,3 +22,10 @@ export function createUserSupabase(config, accessToken) {
     },
   });
 }
+
+export function createAdminSupabase(config) {
+  if (!config.supabaseSecretKey) return null;
+  return createClient(config.supabaseUrl, config.supabaseSecretKey, {
+    auth: authOptions,
+  });
+}

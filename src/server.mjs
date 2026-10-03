@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import express from 'express';
 import helmet from 'helmet';
 import {
@@ -12,8 +13,13 @@ import {
   setSessionCookies,
 } from './auth.mjs';
 import { loadConfig } from './config.mjs';
+import {
+  createLemonSqueezyCheckout,
+  parseLemonSqueezyWebhook,
+  verifyLemonSqueezySignature,
+} from './payments.mjs';
 import { buildContentSecurityPolicy, requireSameOrigin } from './security.mjs';
-import { createPublicSupabase, createUserSupabase } from './supabase.mjs';
+import { createAdminSupabase, createPublicSupabase, createUserSupabase } from './supabase.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..');
@@ -36,6 +42,7 @@ const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml);
 const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
 const config = loadConfig();
 const publicSupabase = createPublicSupabase(config);
+const adminSupabase = createAdminSupabase(config);
 const app = express();
 
 app.set('trust proxy', 1);
@@ -66,6 +73,69 @@ app.use((request, response, next) => {
   });
   next();
 });
+
+app.post('/api/webhooks/lemon-squeezy', express.raw({ type: 'application/json', limit: '64kb' }), asyncRoute(async (request, response) => {
+  if (!config.paymentsConfigured || !adminSupabase) {
+    return response.status(503).json({ error: 'El sistema de pagos no está configurado.' });
+  }
+
+  const signature = request.get('x-signature') ?? '';
+  if (!verifyLemonSqueezySignature(request.body, signature, config.lemonSqueezyWebhookSecret)) {
+    return response.status(401).json({ error: 'Firma no válida.' });
+  }
+
+  let event;
+  try {
+    event = parseLemonSqueezyWebhook(request.body, request.get('x-event-name') ?? '');
+  } catch {
+    return response.status(400).json({ error: 'Webhook no válido.' });
+  }
+
+  if (event.eventName !== 'order_created') {
+    return response.json({ received: true, ignored: true });
+  }
+
+  const attributes = event.payload.data.attributes;
+  const custom = event.payload.meta?.custom_data;
+  const orderId = custom?.order_id;
+  const attemptToken = custom?.payment_attempt_token;
+  const variantId = attributes.first_order_item?.variant_id;
+  const subtotalCents = Number(attributes.subtotal);
+  const testMode = attributes.test_mode === true;
+  const matchesExpectedOrder = isUuid(orderId)
+    && isUuid(attemptToken)
+    && String(attributes.store_id) === String(config.lemonSqueezyStoreId)
+    && attributes.status === 'paid'
+    && typeof attributes.currency === 'string'
+    && Number.isInteger(subtotalCents)
+    && subtotalCents > 0
+    && variantId !== undefined
+    && typeof attributes.user_email === 'string'
+    && testMode === config.lemonSqueezyTestMode;
+  if (!matchesExpectedOrder) {
+    return response.status(400).json({ error: 'El pago no coincide con un pedido válido.' });
+  }
+
+  const { data, error } = await adminSupabase.rpc('complete_payment_order', {
+    p_order_id: orderId,
+    p_attempt_token: attemptToken,
+    p_event_key: event.eventKey,
+    p_event_type: event.eventName,
+    p_provider_object_id: String(event.payload.data.id),
+    p_external_order_id: String(event.payload.data.id),
+    p_payload_sha256: event.payloadSha256,
+    p_provider_variant_id: String(variantId),
+    p_currency: attributes.currency,
+    p_subtotal_cents: subtotalCents,
+    p_customer_email: attributes.user_email,
+    p_test_mode: testMode,
+  });
+  if (error) throw new Error(`Unable to complete verified payment: ${error.code ?? 'database_error'}`);
+
+  response.set('Cache-Control', 'no-store');
+  return response.json({ received: true, result: data });
+}));
+
 app.use(express.json({ limit: '16kb', strict: true }));
 app.use(express.urlencoded({ extended: false, limit: '8kb', parameterLimit: 20 }));
 app.use('/api', requireSameOrigin(config));
@@ -406,6 +476,119 @@ app.delete('/api/cart/items/:productId', asyncRoute(async (request, response) =>
   return response.json({ cart: await readCart(session) });
 }));
 
+app.post('/api/checkout', asyncRoute(async (request, response) => {
+  if (!config.paymentsConfigured || !adminSupabase) {
+    return response.status(503).json({ error: 'El pago está temporalmente fuera de servicio.' });
+  }
+
+  const productId = request.body?.productId;
+  if (!isUuid(productId)) return response.status(400).json({ error: 'Producto no válido.' });
+
+  const session = await getRequestSession(request, response, config, { createAnonymous: true });
+  const attemptToken = crypto.randomUUID();
+  const { data, error } = await session.client.rpc('create_payment_order', {
+    p_product_id: productId,
+    p_provider: 'lemon_squeezy',
+    p_checkout_token: attemptToken,
+    p_test_mode: config.lemonSqueezyTestMode,
+  });
+  const pendingOrder = Array.isArray(data) ? data[0] : data;
+  if (error || !pendingOrder) {
+    return response.status(409).json({ error: 'Este producto aún no está disponible para pago.' });
+  }
+
+  let profile = null;
+  if (!session.user.is_anonymous) profile = await getSessionProfile(session);
+
+  let checkout;
+  try {
+    checkout = await createLemonSqueezyCheckout(config, {
+      orderId: pendingOrder.order_id,
+      attemptToken: pendingOrder.attempt_token,
+      providerVariantId: pendingOrder.provider_variant_id,
+      amountCents: pendingOrder.amount_cents,
+      currency: pendingOrder.currency,
+      productName: pendingOrder.product_name,
+      productSlug: pendingOrder.product_slug,
+      email: session.user.is_anonymous ? null : session.user.email,
+      name: profile?.display_name ?? null,
+    });
+  } catch (checkoutError) {
+    await adminSupabase
+      .from('payment_attempts')
+      .update({ status: 'failed' })
+      .eq('order_id', pendingOrder.order_id)
+      .eq('checkout_token', pendingOrder.attempt_token);
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'checkout_creation_failed',
+      orderId: pendingOrder.order_id,
+      message: checkoutError?.message ?? 'Unknown checkout error',
+    }));
+    return response.status(502).json({ error: 'Lemon Squeezy no pudo iniciar el pago. Inténtalo nuevamente.' });
+  }
+
+  const { error: registrationError } = await session.client.rpc('register_payment_checkout', {
+    p_order_id: pendingOrder.order_id,
+    p_checkout_token: pendingOrder.attempt_token,
+    p_external_checkout_id: checkout.checkoutId,
+  });
+  if (registrationError) throw new Error('Unable to register the Lemon Squeezy checkout.');
+
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.status(201).json({
+    orderId: pendingOrder.order_id,
+    checkoutUrl: checkout.checkoutUrl,
+  });
+}));
+
+app.get('/api/orders/:orderId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.orderId)) return response.status(400).json({ error: 'Pedido no válido.' });
+  const session = await getRequestSession(request, response, config);
+  if (!session) return response.status(401).json({ error: 'La sesión de compra no está disponible.' });
+
+  const { data: order, error } = await session.client
+    .from('orders')
+    .select('id,status,currency,total_cents,completed_at,order_items(id,product_id,product_name)')
+    .eq('id', request.params.orderId)
+    .eq('user_id', session.user.id)
+    .maybeSingle();
+  if (error || !order) return response.status(404).json({ error: 'Pedido no encontrado.' });
+
+  let files = [];
+  if (order.status === 'completed') {
+    const productIds = [...new Set((order.order_items ?? []).map((item) => item.product_id).filter(Boolean))];
+    if (productIds.length > 0) {
+      const { data: availableFiles, error: filesError } = await session.client
+        .from('product_files')
+        .select('id,product_id,download_name,version')
+        .in('product_id', productIds)
+        .eq('is_active', true)
+        .order('version', { ascending: false });
+      if (filesError) throw new Error('Unable to load purchased files from Supabase.');
+      files = availableFiles ?? [];
+    }
+  }
+
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({
+    order: {
+      id: order.id,
+      status: order.status,
+      currency: order.currency,
+      totalCents: order.total_cents,
+      completedAt: order.completed_at,
+      items: order.order_items ?? [],
+      files: files.map((file) => ({
+        id: file.id,
+        productId: file.product_id,
+        name: file.download_name,
+        version: file.version,
+      })),
+    },
+  });
+}));
+
 app.post('/api/newsletter', asyncRoute(async (request, response) => {
   const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
   if (!email || !EMAIL_PATTERN.test(email)) return response.status(400).json({ error: 'Correo electrónico no válido.' });
@@ -420,7 +603,7 @@ app.post('/api/newsletter', asyncRoute(async (request, response) => {
 app.post('/api/downloads/:fileId', asyncRoute(async (request, response) => {
   if (!isUuid(request.params.fileId)) return response.status(400).json({ error: 'Archivo no válido.' });
   const session = await getRequestSession(request, response, config);
-  if (!session || session.user.is_anonymous) return response.status(401).json({ error: 'Inicia sesión para descargar tu compra.' });
+  if (!session) return response.status(401).json({ error: 'La sesión de compra no está disponible.' });
 
   const { data: file, error: fileError } = await session.client
     .from('product_files')

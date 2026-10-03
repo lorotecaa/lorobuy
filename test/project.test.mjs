@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
+import {
+  buildLemonSqueezyCheckoutBody,
+  parseLemonSqueezyWebhook,
+  verifyLemonSqueezySignature,
+} from '../src/payments.mjs';
 import { buildContentSecurityPolicy } from '../src/security.mjs';
 import { assertHighDefinitionDimensions, readMp4Dimensions } from '../scripts/video-quality.mjs';
 
@@ -19,10 +25,12 @@ const builtAuthConfirmHtml = fs.readFileSync(path.join(root, 'dist', 'auth-confi
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
 const authSource = fs.readFileSync(path.join(root, 'src', 'auth.mjs'), 'utf8');
 const configSource = fs.readFileSync(path.join(root, 'src', 'config.mjs'), 'utf8');
+const paymentsSource = fs.readFileSync(path.join(root, 'src', 'payments.mjs'), 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const renderConfig = fs.readFileSync(path.join(root, 'render.yaml'), 'utf8');
 const schema = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020001_initial_schema.sql'), 'utf8');
 const adminMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020004_admin_role.sql'), 'utf8');
+const paymentsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030001_lemon_squeezy_payments.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -35,6 +43,29 @@ test('production configuration requires HTTPS origins and Supabase URL', () => {
   assert.equal(config.appOrigin, 'https://lorobuy.onrender.com');
   assert.equal(config.supabaseUrl, 'https://example-ref.supabase.co');
   assert.equal(config.secureCookies, true);
+  assert.equal(config.paymentsConfigured, false);
+});
+
+test('payment configuration is backend-only and defaults to safe test mode', () => {
+  const config = loadConfig({
+    NODE_ENV: 'production',
+    APP_ORIGIN: 'https://lorobuy.onrender.com',
+    SUPABASE_URL: 'https://example-ref.supabase.co',
+    SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
+    SUPABASE_SECRET_KEY: 'sb_secret_test',
+    LEMON_SQUEEZY_API_KEY: 'lemon_test_key',
+    LEMON_SQUEEZY_STORE_ID: '1234',
+    LEMON_SQUEEZY_WEBHOOK_SECRET: 'webhook_secret',
+  });
+  assert.equal(config.paymentsConfigured, true);
+  assert.equal(config.lemonSqueezyTestMode, true);
+  assert.throws(() => loadConfig({
+    NODE_ENV: 'development',
+    APP_ORIGIN: 'http://localhost:10000',
+    SUPABASE_URL: 'http://localhost:54321',
+    SUPABASE_PUBLISHABLE_KEY: 'test',
+    LEMON_SQUEEZY_TEST_MODE: 'yes',
+  }), /must be either true or false/);
 });
 
 test('CSP allows only the same-origin API and hashed inline code', () => {
@@ -77,6 +108,50 @@ test('catalog and cart are loaded through the API, not local product arrays', ()
   assert.doesNotMatch(html, /const packs\s*=/);
   assert.doesNotMatch(html, /const love\s*=/);
   assert.doesNotMatch(html, /const snipe\s*=/);
+});
+
+test('checkout is external and paid access is granted only by a signed idempotent webhook', () => {
+  const config = {
+    appOrigin: 'https://lorobuy.onrender.com',
+    lemonSqueezyStoreId: '1234',
+    lemonSqueezyTestMode: true,
+  };
+  const body = buildLemonSqueezyCheckoutBody(config, {
+    orderId: '11111111-1111-4111-8111-111111111111',
+    attemptToken: '22222222-2222-4222-8222-222222222222',
+    providerVariantId: '9876',
+    amountCents: 13900,
+    productName: 'Mega Pack Dioses Nórdicos',
+    productSlug: 'mega-pack-dioses-nordicos',
+  });
+  assert.equal(body.data.attributes.custom_price, 13900);
+  assert.equal(body.data.attributes.checkout_options.embed, false);
+  assert.equal(body.data.attributes.checkout_options.discount, false);
+  assert.equal(body.data.relationships.variant.data.id, '9876');
+  assert.match(body.data.attributes.product_options.redirect_url, /^https:\/\/lorobuy\.onrender\.com\/products\//);
+
+  const webhookBody = Buffer.from(JSON.stringify({
+    meta: { event_name: 'order_created', custom_data: {} },
+    data: { type: 'orders', id: '55', attributes: {} },
+  }));
+  const secret = 'signed-webhook-secret';
+  const signature = crypto.createHmac('sha256', secret).update(webhookBody).digest('hex');
+  assert.equal(verifyLemonSqueezySignature(webhookBody, signature, secret), true);
+  assert.equal(verifyLemonSqueezySignature(webhookBody, '0'.repeat(64), secret), false);
+  const event = parseLemonSqueezyWebhook(webhookBody, 'order_created');
+  assert.equal(event.eventKey, 'order_created:orders:55');
+  assert.match(event.payloadSha256, /^[a-f0-9]{64}$/);
+
+  assert.match(server, /app\.post\('\/api\/checkout'/);
+  assert.match(server, /app\.post\('\/api\/webhooks\/lemon-squeezy'/);
+  assert.match(server, /attributes\.status === 'paid'/);
+  assert.match(server, /complete_payment_order/);
+  assert.match(productHtml, /location\.assign\(result\.checkoutUrl\)/);
+  assert.match(paymentsMigration, /unique \(provider, event_key\)/);
+  assert.match(paymentsMigration, /grant execute on function public\.complete_payment_order[\s\S]+to service_role;/);
+  assert.match(paymentsMigration, /create trigger orders_require_verified_payment/);
+  assert.match(paymentsMigration, /orders can only be completed by a verified payment webhook/);
+  assert.match(paymentsMigration, /set status = 'completed'/);
 });
 
 test('catalog cards preview video on hover and open a dedicated product page', () => {
@@ -141,10 +216,13 @@ test('email confirmation uses the configured public origin and a protected callb
   assert.match(server, /app\.get\('\/auth\/confirm'/);
 });
 
-test('server uses only the Supabase publishable key', () => {
-  const backendSource = `${server}\n${configSource}`;
+test('payment secrets stay on the backend and never enter storefront code', () => {
+  const backendSource = `${server}\n${configSource}\n${paymentsSource}`;
+  const browserSource = `${html}\n${productHtml}\n${adminHtml}\n${authConfirmHtml}`;
   assert.match(backendSource, /SUPABASE_PUBLISHABLE_KEY/);
-  assert.doesNotMatch(backendSource, /SUPABASE_SECRET_KEY|service_role|sb_secret_/);
+  assert.match(backendSource, /SUPABASE_SECRET_KEY/);
+  assert.match(backendSource, /LEMON_SQUEEZY_API_KEY/);
+  assert.doesNotMatch(browserSource, /SUPABASE_SECRET_KEY|LEMON_SQUEEZY_API_KEY|LEMON_SQUEEZY_WEBHOOK_SECRET|sb_secret_/);
 });
 
 test('every application table enables RLS', () => {
@@ -154,6 +232,9 @@ test('every application table enables RLS', () => {
   ];
   for (const table of tables) {
     assert.match(schema, new RegExp(`alter table public\\.${table} enable row level security;`));
+  }
+  for (const table of ['payment_provider_variants', 'payment_attempts', 'payment_events']) {
+    assert.match(paymentsMigration, new RegExp(`alter table public\\.${table} enable row level security;`));
   }
 });
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
@@ -69,6 +70,7 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let resendPayload;
   let resendRequestUrl;
   let signinPayload;
+  let webhookRpcPayload;
   const readJsonBody = async (request) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -76,6 +78,13 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   };
 
   const supabaseMock = http.createServer(async (request, response) => {
+    if (request.url === '/rest/v1/rpc/complete_payment_order') {
+      assert.equal(request.headers.apikey, 'sb_secret_mock');
+      assert.equal(request.headers.authorization, 'Bearer sb_secret_mock');
+      webhookRpcPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify('completed'));
+    }
     assert.equal(request.headers.apikey, 'sb_publishable_mock');
     if (request.method === 'POST' && request.url?.startsWith('/auth/v1/signup')) {
       signupRequestUrl = request.url;
@@ -170,6 +179,11 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       APP_ORIGIN: appOrigin,
       SUPABASE_URL: `http://127.0.0.1:${supabasePort}`,
       SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_mock',
+      SUPABASE_SECRET_KEY: 'sb_secret_mock',
+      LEMON_SQUEEZY_API_KEY: 'lemon_api_mock',
+      LEMON_SQUEEZY_STORE_ID: '77',
+      LEMON_SQUEEZY_WEBHOOK_SECRET: 'lemon_webhook_secret',
+      LEMON_SQUEEZY_TEST_MODE: 'true',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -317,4 +331,55 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     body: JSON.stringify({ email: 'person@example.com' }),
   });
   assert.equal(crossOriginResponse.status, 403);
+
+  const webhookPayload = {
+    meta: {
+      event_name: 'order_created',
+      custom_data: {
+        order_id: '44444444-4444-4444-8444-444444444444',
+        payment_attempt_token: '55555555-5555-4555-8555-555555555555',
+      },
+    },
+    data: {
+      type: 'orders',
+      id: '123456',
+      attributes: {
+        store_id: 77,
+        status: 'paid',
+        currency: 'USD',
+        subtotal: 13900,
+        user_email: 'buyer@example.com',
+        test_mode: true,
+        first_order_item: { variant_id: 9876 },
+      },
+    },
+  };
+  const rawWebhook = JSON.stringify(webhookPayload);
+  const invalidWebhookResponse = await fetch(`${appOrigin}/api/webhooks/lemon-squeezy`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Event-Name': 'order_created',
+      'X-Signature': '0'.repeat(64),
+    },
+    body: rawWebhook,
+  });
+  assert.equal(invalidWebhookResponse.status, 401);
+
+  const signature = crypto.createHmac('sha256', 'lemon_webhook_secret').update(rawWebhook).digest('hex');
+  const verifiedWebhookResponse = await fetch(`${appOrigin}/api/webhooks/lemon-squeezy`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Event-Name': 'order_created',
+      'X-Signature': signature,
+    },
+    body: rawWebhook,
+  });
+  assert.equal(verifiedWebhookResponse.status, 200);
+  assert.deepEqual(await verifiedWebhookResponse.json(), { received: true, result: 'completed' });
+  assert.equal(webhookRpcPayload.p_order_id, webhookPayload.meta.custom_data.order_id);
+  assert.equal(webhookRpcPayload.p_attempt_token, webhookPayload.meta.custom_data.payment_attempt_token);
+  assert.equal(webhookRpcPayload.p_provider_variant_id, '9876');
+  assert.equal(webhookRpcPayload.p_subtotal_cents, 13900);
 });

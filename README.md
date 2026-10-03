@@ -2,7 +2,7 @@
 
 LoroBuy is a Node web service prepared for Render. Supabase is the only runtime source of truth for authentication, profiles, catalog records, carts, orders, purchase history, newsletter subscriptions, download authorization, and download history. Render serves the existing storefront and the API; it does not keep application data on its filesystem or in process memory.
 
-Payments and third-party integrations are intentionally not implemented yet.
+Payments use an external Lemon Squeezy checkout. LoroBuy creates its own pending order first, but never receives or stores card details. A signed webhook is the only path that can complete an order and unlock private downloads.
 
 ## Architecture
 
@@ -10,11 +10,12 @@ Payments and third-party integrations are intentionally not implemented yet.
 - `dist/`: generated frontend output; `npm run build` recreates it and it is not committed.
 - `src/server.mjs`: same-origin API and static delivery for Render.
 - `src/auth.mjs`: secure, HTTP-only Supabase Auth session cookies.
+- `src/payments.mjs`: provider adapter, Lemon Squeezy checkout requests, and webhook signature validation.
 - `supabase/migrations/`: database schema, RLS policies, initial catalog, and private Storage rules.
 - `render.yaml`: Render Blueprint with secrets declared as dashboard-managed values.
 - `scripts/smoke-test.mjs`: read-only production connectivity test.
 
-The browser never receives a Supabase secret key. The API uses the low-privilege publishable key and forwards the signed-in user's JWT, so Supabase RLS remains the final authorization boundary.
+The browser never receives a Supabase secret key or Lemon Squeezy API secret. Normal API operations use the low-privilege publishable key and the signed-in user's JWT. The backend-only Supabase secret key is used solely for verified payment events that must bypass customer RLS.
 
 ## High-quality product previews
 
@@ -53,14 +54,48 @@ The migration creates a private `product-files` Storage bucket. Upload product a
 
 Customers can obtain a 60-second signed download URL only when a completed order contains the product. Every issued download is recorded in `public.downloads`.
 
-## 3. Deploy to Render
+## 3. Configure Lemon Squeezy
+
+1. Apply `202610030001_lemon_squeezy_payments.sql` after the existing migrations.
+2. In Lemon Squeezy test mode, create a one-time digital product/variant for each LoroBuy product you want to sell.
+3. Connect each LoroBuy product to its Lemon Squeezy Variant ID. Repeat this statement with the real slug and Variant ID:
+
+   ```sql
+   insert into public.payment_provider_variants (product_id, provider, external_variant_id)
+   select id, 'lemon_squeezy', 'LEMON_VARIANT_ID'
+   from public.products
+   where slug = 'mega-pack-dioses-nordicos'
+   on conflict (product_id, provider) do update
+   set external_variant_id = excluded.external_variant_id,
+       is_active = true;
+   ```
+
+4. Create a Lemon Squeezy webhook pointing to:
+
+   ```text
+   https://lorobuy.onrender.com/api/webhooks/lemon-squeezy
+   ```
+
+   Subscribe it to `order_created`. Use a long random signing secret and put the exact same value in Render as `LEMON_SQUEEZY_WEBHOOK_SECRET`.
+5. Keep `LEMON_SQUEEZY_TEST_MODE=true` while testing. Test-mode API keys, store data, variants, purchases, and webhooks must all be created in Lemon Squeezy test mode. Create equivalent live products and replace the IDs and API key before setting the variable to `false`.
+
+The checkout API fixes the price from Supabase, disables checkout discounts, and passes a random attempt token. The webhook verifies its HMAC-SHA256 signature, store, mode, variant, currency, subtotal, order, and token. The database completes the order and records the event in one transaction; a unique event key makes retries idempotent.
+
+Guest purchases use an anonymous Supabase session, so registration is not required. The same secure browser session can retrieve the completed order and request a 60-second URL from the private `product-files` bucket.
+
+## 4. Deploy to Render
 
 1. Push this repository to the Git provider you will connect to Render.
 2. In Render, create a Blueprint from the repository. Render reads `render.yaml`, installs dependencies, and generates `dist/` from `frontend/`.
-3. Fill the three dashboard-managed variables:
+3. Fill the dashboard-managed variables:
    - `SUPABASE_URL`
    - `SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_SECRET_KEY` — backend only
    - `APP_ORIGIN` — the exact Render URL, for example `https://lorobuy.onrender.com`
+   - `LEMON_SQUEEZY_API_KEY` — backend only
+   - `LEMON_SQUEEZY_STORE_ID`
+   - `LEMON_SQUEEZY_WEBHOOK_SECRET` — backend only
+   - `LEMON_SQUEEZY_TEST_MODE` — `true` for testing, `false` only after switching every Lemon Squeezy resource to live mode
 4. Deploy. Render supplies `PORT` automatically and calls `/api/health`.
 
 Use these commands if the Render service is configured manually instead of through the Blueprint:
@@ -70,9 +105,9 @@ Build Command: npm ci && npm run build
 Start Command: npm start
 ```
 
-Do not add a Supabase secret key unless a future backend-only feature truly requires it. The current application deliberately works with the publishable key plus RLS.
+Never use `SUPABASE_SECRET_KEY`, `LEMON_SQUEEZY_API_KEY`, or `LEMON_SQUEEZY_WEBHOOK_SECRET` in `frontend/`, public JavaScript, screenshots, support messages, or Git. Render injects them only into the Node process.
 
-## 4. Local checks
+## 5. Local checks
 
 Copy `.env.example` to `.env`, fill only local values, then run:
 
@@ -98,5 +133,7 @@ npm run smoke
 - Authenticated users can access only their own profile, active cart, orders, order items, and download history.
 - Catalog and order administration requires `profiles.role = 'admin'` and is enforced in both the API and RLS.
 - Purchased files use a private Storage bucket with RLS; no public file URLs are created.
+- Orders remain `pending` after checkout creation and become `completed` only inside the signed, service-role webhook transaction.
+- Duplicate Lemon Squeezy events are stored once and safely acknowledged without granting access twice.
 - Auth tokens are stored in secure, HTTP-only, same-site cookies and API writes require the configured same origin.
 - The server validates inputs, limits request bodies, hides internal errors, and sends a strict CSP and browser security headers.

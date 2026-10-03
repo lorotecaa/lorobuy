@@ -192,15 +192,26 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(catalog.products.length, 1);
   assert.equal(catalog.products[0].name, 'Mock Product');
 
+  const shortPasswordResponse = await fetch(`${appOrigin}/api/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ displayName: 'Cliente', email: 'cliente@example.com', password: 'abcde' }),
+  });
+  assert.equal(shortPasswordResponse.status, 400);
+  assert.deepEqual(await shortPasswordResponse.json(), {
+    error: 'Nombre, correo o contraseña no válidos. La contraseña debe tener al menos 6 caracteres.',
+  });
+
   const signupResponse = await fetch(`${appOrigin}/api/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: appOrigin },
-    body: JSON.stringify({ displayName: 'Cliente', email: 'cliente@example.com', password: 'StrongPass123!' }),
+    body: JSON.stringify({ displayName: 'Cliente', email: 'cliente@example.com', password: 'abcdef' }),
   });
   assert.equal(signupResponse.status, 202);
   assert.deepEqual(await signupResponse.json(), { created: true, confirmationRequired: true });
   assert.equal(signupPayload.data.full_name, 'Cliente');
   assert.equal(signupPayload.email, 'cliente@example.com');
+  assert.equal(signupPayload.password, 'abcdef');
   assert.equal(new URL(signupRequestUrl, appOrigin).searchParams.get('redirect_to'), `${appOrigin}/auth/confirm`);
 
   const limitedSignupResponse = await fetch(`${appOrigin}/api/auth/signup`, {

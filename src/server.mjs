@@ -69,6 +69,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const IMAGE_PATTERN = /^assets\/[a-z0-9-]+\.(?:webp|png|jpe?g)$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 6;
 
 function asyncRoute(handler) {
   return (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
@@ -102,7 +103,7 @@ function publicSignupError(error) {
   if (code === 'weak_password') {
     return {
       status: 400,
-      message: 'La contraseña no cumple los requisitos de seguridad. Usa mayúsculas, minúsculas, números y símbolos.',
+      message: `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`,
     };
   }
   if (code === 'signup_disabled') {
@@ -227,8 +228,8 @@ app.post('/api/auth/signup', asyncRoute(async (request, response) => {
   const displayName = normalizeText(request.body?.displayName, 100, { required: true });
   const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
   const password = normalizeText(request.body?.password, 128, { required: true });
-  if (!displayName || !email || !EMAIL_PATTERN.test(email) || !password || password.length < 12) {
-    return response.status(400).json({ error: 'Nombre, correo o contraseña no válidos. La contraseña debe tener al menos 12 caracteres.' });
+  if (!displayName || !email || !EMAIL_PATTERN.test(email) || !password || password.length < MIN_PASSWORD_LENGTH) {
+    return response.status(400).json({ error: `Nombre, correo o contraseña no válidos. La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.` });
   }
 
   const { data, error } = await createPublicSupabase(config).auth.signUp({

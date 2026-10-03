@@ -61,6 +61,8 @@ test('account interface provides sign-in, registration, profile, and admin entry
   assert.match(html, /fetch\(url/);
   assert.match(authConfirmHtml, /fetch\('\/api\/auth\/confirm'/);
   assert.doesNotMatch(authConfirmHtml, /localStorage|sessionStorage/);
+  assert.match(html, /minlength="6"/);
+  assert.match(html, /Usa al menos 6 caracteres/);
 });
 
 test('catalog and cart are loaded through the API, not local product arrays', () => {

@@ -691,8 +691,7 @@ create table public.payment_provider_variants (
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  primary key (product_id, provider),
-  unique (provider, external_variant_id)
+  primary key (product_id, provider)
 );
 
 create table public.payment_attempts (
@@ -732,6 +731,8 @@ create table public.payment_events (
 );
 
 create index payment_attempts_order_idx on public.payment_attempts (order_id, created_at desc);
+create index payment_provider_variants_provider_external_variant_idx
+  on public.payment_provider_variants (provider, external_variant_id);
 create unique index payment_attempts_external_order_unique
   on public.payment_attempts (provider, external_order_id)
   where external_order_id is not null;
@@ -1037,7 +1038,8 @@ grant execute on function public.create_payment_order(uuid, text, uuid, boolean)
 grant execute on function public.register_payment_checkout(uuid, uuid, text) to authenticated;
 grant execute on function public.complete_payment_order(uuid, uuid, text, text, text, text, text, text, text, integer, text, boolean) to service_role;
 
--- Connect only Mega Pack Dioses Nórdicos to the current Lemon Squeezy test variant.
+-- Reuse the current Lemon Squeezy test variant for every active catalog product.
+-- Product identity and pricing remain bound to the server-created LoroBuy order.
 
 insert into public.payment_provider_variants (
   product_id,
@@ -1051,24 +1053,33 @@ select
   '2202114',
   true
 from public.products
-where slug = 'mega-pack-dioses-nordicos'
+where is_active = true
 on conflict (product_id, provider) do update
 set external_variant_id = excluded.external_variant_id,
     is_active = true,
     updated_at = now();
 
 do $$
+declare
+  active_product_count integer;
+  mapped_product_count integer;
 begin
-  if not exists (
-    select 1
-    from public.payment_provider_variants ppv
-    join public.products p on p.id = ppv.product_id
-    where p.slug = 'mega-pack-dioses-nordicos'
-      and ppv.provider = 'lemon_squeezy'
-      and ppv.external_variant_id = '2202114'
-      and ppv.is_active = true
-  ) then
-    raise exception 'Mega Pack Dioses Nórdicos was not found or could not be mapped';
+  select count(*)
+  into active_product_count
+  from public.products
+  where is_active = true;
+
+  select count(*)
+  into mapped_product_count
+  from public.payment_provider_variants ppv
+  join public.products p on p.id = ppv.product_id
+  where p.is_active = true
+    and ppv.provider = 'lemon_squeezy'
+    and ppv.external_variant_id = '2202114'
+    and ppv.is_active = true;
+
+  if active_product_count = 0 or mapped_product_count <> active_product_count then
+    raise exception 'Not every active LoroBuy product was mapped to Lemon Squeezy';
   end if;
 end;
 $$;
@@ -1079,6 +1090,13 @@ commit;
 select
   (select count(*) from public.categories) as categories,
   (select count(*) from public.products) as products,
+  (
+    select count(*)
+    from public.payment_provider_variants
+    where provider = 'lemon_squeezy'
+      and external_variant_id = '2202114'
+      and is_active = true
+  ) as lemon_mapped_products,
   (select count(*) from storage.buckets where id = 'product-files' and public = false) as private_buckets,
   (
     select count(*)

@@ -32,6 +32,7 @@ const schema = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610
 const adminMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020004_admin_role.sql'), 'utf8');
 const paymentsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030001_lemon_squeezy_payments.sql'), 'utf8');
 const nordicsPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030002_map_nordicos_lemon_test_variant.sql'), 'utf8');
+const catalogPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040001_map_catalog_lemon_test_variant.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -155,19 +156,17 @@ test('checkout is external and paid access is granted only by a signed idempoten
   assert.match(paymentsMigration, /set status = 'completed'/);
 });
 
-test('only the Nordic pack is mapped to the configured Lemon Squeezy test variant', () => {
+test('the Nordic mapping is safely expanded to every active catalog product', () => {
   assert.match(nordicsPaymentMapping, /where slug = 'mega-pack-dioses-nordicos'/);
   assert.match(nordicsPaymentMapping, /'lemon_squeezy'/);
   assert.match(nordicsPaymentMapping, /'2202114'/);
   assert.equal((nordicsPaymentMapping.match(/insert into public\.payment_provider_variants/g) ?? []).length, 1);
-  for (const slug of [
-    'mega-pack-dioses-egipto',
-    'mega-pack-dioses-olimpo',
-    'mega-pack-galactico',
-    'mega-pack-dragon-fire',
-  ]) {
-    assert.doesNotMatch(nordicsPaymentMapping, new RegExp(slug));
-  }
+  assert.match(catalogPaymentMapping, /drop constraint if exists payment_provider_variants_provider_external_variant_id_key/);
+  assert.match(catalogPaymentMapping, /where is_active = true/);
+  assert.match(catalogPaymentMapping, /mapped_product_count <> active_product_count/);
+  assert.match(catalogPaymentMapping, /'lemon_squeezy'/);
+  assert.match(catalogPaymentMapping, /'2202114'/);
+  assert.doesNotMatch(catalogPaymentMapping, /where slug =/);
 });
 
 test('catalog cards preview video on hover and open a dedicated product page', () => {

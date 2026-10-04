@@ -31,6 +31,7 @@ const renderConfig = fs.readFileSync(path.join(root, 'render.yaml'), 'utf8');
 const schema = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020001_initial_schema.sql'), 'utf8');
 const adminMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610020004_admin_role.sql'), 'utf8');
 const paymentsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030001_lemon_squeezy_payments.sql'), 'utf8');
+const nordicsPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030002_map_nordicos_lemon_test_variant.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -152,6 +153,21 @@ test('checkout is external and paid access is granted only by a signed idempoten
   assert.match(paymentsMigration, /create trigger orders_require_verified_payment/);
   assert.match(paymentsMigration, /orders can only be completed by a verified payment webhook/);
   assert.match(paymentsMigration, /set status = 'completed'/);
+});
+
+test('only the Nordic pack is mapped to the configured Lemon Squeezy test variant', () => {
+  assert.match(nordicsPaymentMapping, /where slug = 'mega-pack-dioses-nordicos'/);
+  assert.match(nordicsPaymentMapping, /'lemon_squeezy'/);
+  assert.match(nordicsPaymentMapping, /'2202114'/);
+  assert.equal((nordicsPaymentMapping.match(/insert into public\.payment_provider_variants/g) ?? []).length, 1);
+  for (const slug of [
+    'mega-pack-dioses-egipto',
+    'mega-pack-dioses-olimpo',
+    'mega-pack-galactico',
+    'mega-pack-dragon-fire',
+  ]) {
+    assert.doesNotMatch(nordicsPaymentMapping, new RegExp(slug));
+  }
 });
 
 test('catalog cards preview video on hover and open a dedicated product page', () => {

@@ -115,8 +115,16 @@ export async function createLemonSqueezyCheckout(config, order) {
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) {
-    const providerCode = result?.errors?.[0]?.code ?? `http_${response.status}`;
-    throw new Error(`Lemon Squeezy checkout failed: ${providerCode}`);
+    const providerError = result?.errors?.[0];
+    const providerCode = providerError?.code ?? `http_${response.status}`;
+    const providerDetail = [providerError?.title, providerError?.detail]
+      .filter((value) => typeof value === 'string' && value.trim())
+      .join(': ')
+      .replace(/[\r\n\t]+/g, ' ')
+      .slice(0, 500);
+    throw new Error(
+      `Lemon Squeezy checkout failed: ${providerCode}${providerDetail ? ` - ${providerDetail}` : ''}`,
+    );
   }
 
   const checkoutId = result?.data?.id;

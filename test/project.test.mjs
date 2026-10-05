@@ -33,6 +33,7 @@ const adminMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations',
 const paymentsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030001_lemon_squeezy_payments.sql'), 'utf8');
 const nordicsPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030002_map_nordicos_lemon_test_variant.sql'), 'utf8');
 const catalogPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040001_map_catalog_lemon_test_variant.sql'), 'utf8');
+const adminCatalogMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040002_admin_products_prices.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -264,6 +265,22 @@ test('admin access is enforced by confirmed Supabase identity, backend role chec
   assert.match(adminMigration, /new\.email_confirmed_at is not null/);
   assert.match(adminMigration, /set role = 'admin'/);
   assert.match(adminMigration, /join auth\.users u on u\.id = p\.id/);
+});
+
+test('admin products and prices use the existing catalog with an atomic Lemon mapping', () => {
+  assert.match(server, /app\.get\('\/api\/admin\/catalog'/);
+  assert.match(server, /app\.post\('\/api\/admin\/products'/);
+  assert.match(server, /app\.patch\('\/api\/admin\/products\/:productId'/);
+  assert.match(server, /app\.delete\('\/api\/admin\/products\/:productId'/);
+  assert.match(server, /integerInRange\(body\?\.priceCents, 50, 100_000_000\)/);
+  assert.match(server, /\.rpc\('admin_create_product'/);
+  assert.match(adminCatalogMigration, /security definer/);
+  assert.match(adminCatalogMigration, /not public\.is_admin\(auth\.uid\(\)\)/);
+  assert.match(adminCatalogMigration, /from public\.payment_provider_variants/);
+  assert.match(adminCatalogMigration, /insert into public\.payment_provider_variants/);
+  assert.match(adminHtml, /data-panel="products"/);
+  assert.match(adminHtml, /data-panel="prices"/);
+  assert.doesNotMatch(adminHtml, /SUPABASE_SECRET_KEY|service_role|sb_secret_/);
 });
 
 test('all referenced local assets exist', () => {

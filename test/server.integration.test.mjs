@@ -40,6 +40,7 @@ function waitForReady(child) {
 test('Render server serves the unchanged storefront and reads catalog data from Supabase', { timeout: 15_000 }, async (context) => {
   const product = {
     id: '11111111-1111-4111-8111-111111111111',
+    category_id: '66666666-6666-4666-8666-666666666666',
     slug: 'mock-product',
     name: 'Mock Product',
     description: null,
@@ -48,7 +49,16 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     compare_at_price_cents: 3999,
     currency: 'USD',
     sort_order: 10,
-    categories: { slug: 'quiereme', name: 'Animaciones Quiéreme', sort_order: 20, is_active: true },
+    is_active: true,
+    updated_at: '2026-10-04T12:00:00.000Z',
+    categories: { id: '66666666-6666-4666-8666-666666666666', slug: 'quiereme', name: 'Animaciones Quiéreme', sort_order: 20, is_active: true },
+  };
+  const category = {
+    id: '66666666-6666-4666-8666-666666666666',
+    slug: 'quiereme',
+    name: 'Animaciones Quiéreme',
+    sort_order: 20,
+    is_active: true,
   };
   const adminUser = {
     id: '22222222-2222-4222-8222-222222222222',
@@ -71,6 +81,8 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let resendRequestUrl;
   let signinPayload;
   let webhookRpcPayload;
+  let adminCreatePayload;
+  let adminUpdatePayload;
   const readJsonBody = async (request) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -84,6 +96,17 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       webhookRpcPayload = await readJsonBody(request);
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify('completed'));
+    }
+    if (request.url === '/rest/v1/rpc/admin_create_product') {
+      assert.equal(request.headers.apikey, 'sb_publishable_mock');
+      assert.equal(request.headers.authorization, 'Bearer admin-token');
+      adminCreatePayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify([{ ...product,
+        slug: adminCreatePayload.p_slug,
+        name: adminCreatePayload.p_name,
+        price_cents: adminCreatePayload.p_price_cents,
+      }]));
     }
     assert.equal(request.headers.apikey, 'sb_publishable_mock');
     if (request.method === 'POST' && request.url?.startsWith('/auth/v1/signup')) {
@@ -154,9 +177,18 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       response.statusCode = 401;
       return response.end(JSON.stringify({ message: 'invalid token' }));
     }
+    if (request.url?.startsWith('/rest/v1/categories')) {
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify([category]));
+    }
     if (request.url?.startsWith('/rest/v1/products')) {
       response.setHeader('Content-Range', '0-0/1');
       if (request.method === 'HEAD') return response.end();
+      if (request.method === 'PATCH') {
+        adminUpdatePayload = await readJsonBody(request);
+        response.setHeader('Content-Type', 'application/json');
+        return response.end(JSON.stringify([{ ...product, ...adminUpdatePayload }]));
+      }
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify([product]));
     }
@@ -324,6 +356,65 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(adminSession.user.email, 'loroteca98@gmail.com');
   assert.equal(adminSession.user.role, 'admin');
   assert.equal(adminSession.user.isAdmin, true);
+
+  const forbiddenCatalogResponse = await fetch(`${appOrigin}/api/admin/catalog`, {
+    headers: { Cookie: 'lorobuy_access=customer-token' },
+  });
+  assert.equal(forbiddenCatalogResponse.status, 403);
+
+  const adminCatalogResponse = await fetch(`${appOrigin}/api/admin/catalog`, {
+    headers: { Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(adminCatalogResponse.status, 200);
+  assert.equal(adminCatalogResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+  const adminCatalog = await adminCatalogResponse.json();
+  assert.equal(adminCatalog.products[0].priceCents, 2499);
+  assert.equal(adminCatalog.products[0].category.name, 'Animaciones Quiéreme');
+  assert.equal(adminCatalog.categories[0].id, category.id);
+
+  const invalidPriceResponse = await fetch(`${appOrigin}/api/admin/products/${product.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+    body: JSON.stringify({ priceCents: 49 }),
+  });
+  assert.equal(invalidPriceResponse.status, 400);
+
+  const createProductResponse = await fetch(`${appOrigin}/api/admin/products`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+    body: JSON.stringify({
+      categoryId: category.id,
+      slug: 'producto-nuevo',
+      name: 'Producto nuevo',
+      description: 'Descripción segura',
+      imagePath: 'assets/favicon.png',
+      priceCents: 5000,
+      compareAtPriceCents: 6500,
+      currency: 'USD',
+      sortOrder: 30,
+      isActive: true,
+    }),
+  });
+  assert.equal(createProductResponse.status, 201);
+  assert.equal(adminCreatePayload.p_price_cents, 5000);
+  assert.equal(adminCreatePayload.p_slug, 'producto-nuevo');
+
+  const updatePriceResponse = await fetch(`${appOrigin}/api/admin/products/${product.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+    body: JSON.stringify({ priceCents: 3200, compareAtPriceCents: 4000 }),
+  });
+  assert.equal(updatePriceResponse.status, 200);
+  assert.equal((await updatePriceResponse.json()).product.priceCents, 3200);
+  assert.equal(adminUpdatePayload.price_cents, 3200);
+
+  const deactivateResponse = await fetch(`${appOrigin}/api/admin/products/${product.id}`, {
+    method: 'DELETE',
+    headers: { Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(deactivateResponse.status, 200);
+  assert.equal((await deactivateResponse.json()).deactivated, true);
+  assert.equal(adminUpdatePayload.is_active, false);
 
   const crossOriginResponse = await fetch(`${appOrigin}/api/newsletter`, {
     method: 'POST',

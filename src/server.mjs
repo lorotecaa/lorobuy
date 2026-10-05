@@ -660,6 +660,56 @@ app.post('/api/admin/categories', asyncRoute(async (request, response) => {
   return response.status(201).json({ category: data });
 }));
 
+function adminProduct(row) {
+  return {
+    id: row.id,
+    categoryId: row.category_id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    imagePath: IMAGE_PATTERN.test(row.image_path) ? row.image_path : 'assets/favicon.png',
+    priceCents: row.price_cents,
+    compareAtPriceCents: row.compare_at_price_cents,
+    currency: row.currency,
+    sortOrder: row.sort_order,
+    isActive: row.is_active,
+    updatedAt: row.updated_at,
+    category: row.categories ? { id: row.categories.id, name: row.categories.name, slug: row.categories.slug } : null,
+  };
+}
+
+app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+
+  const [productsResult, categoriesResult] = await Promise.all([
+    session.client
+      .from('products')
+      .select('id,category_id,slug,name,description,image_path,price_cents,compare_at_price_cents,currency,sort_order,is_active,updated_at,categories(id,slug,name)')
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true }),
+    session.client
+      .from('categories')
+      .select('id,slug,name,sort_order,is_active')
+      .order('sort_order', { ascending: true }),
+  ]);
+
+  if (productsResult.error || categoriesResult.error) {
+    throw new Error('Unable to load the administrative catalog from Supabase.');
+  }
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({
+    products: (productsResult.data ?? []).map(adminProduct),
+    categories: (categoriesResult.data ?? []).map((category) => ({
+      id: category.id,
+      slug: category.slug,
+      name: category.name,
+      sortOrder: category.sort_order,
+      isActive: category.is_active,
+    })),
+  });
+}));
+
 function validatedProductPayload(body, { partial = false } = {}) {
   const payload = {};
   const required = !partial;
@@ -679,18 +729,19 @@ function validatedProductPayload(body, { partial = false } = {}) {
   }
   if (required || has('imagePath')) {
     payload.image_path = normalizeText(body?.imagePath, 255, { required: true });
-    if (!payload.image_path || !IMAGE_PATTERN.test(payload.image_path)) return null;
+    if (!payload.image_path || !IMAGE_PATTERN.test(payload.image_path)
+        || !fs.existsSync(path.join(FRONTEND_BUILD_DIR, payload.image_path))) return null;
   }
   if (required || has('currency')) {
     payload.currency = normalizeText(body?.currency ?? 'USD', 3, { required: true })?.toUpperCase();
-    if (!/^[A-Z]{3}$/.test(payload.currency ?? '')) return null;
+    if (payload.currency !== 'USD') return null;
   }
   if (required || has('categoryId')) {
     if (!isUuid(body?.categoryId)) return null;
     payload.category_id = body.categoryId;
   }
   if (required || has('priceCents')) {
-    payload.price_cents = integerInRange(body?.priceCents, 0, 100_000_000);
+    payload.price_cents = integerInRange(body?.priceCents, 50, 100_000_000);
     if (payload.price_cents === null) return null;
   }
   if (has('compareAtPriceCents')) {
@@ -708,6 +759,8 @@ function validatedProductPayload(body, { partial = false } = {}) {
     payload.is_active = body.isActive;
   }
   if (partial && fields.every((field) => !has(field))) return null;
+  if (payload.compare_at_price_cents !== undefined && payload.price_cents !== undefined
+      && payload.compare_at_price_cents !== null && payload.compare_at_price_cents < payload.price_cents) return null;
   return payload;
 }
 
@@ -717,9 +770,20 @@ app.post('/api/admin/products', asyncRoute(async (request, response) => {
   const payload = validatedProductPayload(request.body);
   if (!payload) return response.status(400).json({ error: 'Datos de producto no válidos.' });
 
-  const { data, error } = await session.client.from('products').insert(payload).select().single();
+  const { data, error } = await session.client.rpc('admin_create_product', {
+    p_category_id: payload.category_id,
+    p_slug: payload.slug,
+    p_name: payload.name,
+    p_description: payload.description ?? null,
+    p_image_path: payload.image_path,
+    p_price_cents: payload.price_cents,
+    p_compare_at_price_cents: payload.compare_at_price_cents ?? null,
+    p_currency: payload.currency,
+    p_sort_order: payload.sort_order,
+    p_is_active: payload.is_active ?? true,
+  }).single();
   if (error) return response.status(400).json({ error: 'No fue posible crear el producto.' });
-  return response.status(201).json({ product: data });
+  return response.status(201).json({ product: adminProduct(data) });
 }));
 
 app.patch('/api/admin/products/:productId', asyncRoute(async (request, response) => {
@@ -736,7 +800,22 @@ app.patch('/api/admin/products/:productId', asyncRoute(async (request, response)
     .select()
     .maybeSingle();
   if (error || !data) return response.status(404).json({ error: 'Producto no encontrado.' });
-  return response.json({ product: data });
+  return response.json({ product: adminProduct(data) });
+}));
+
+app.delete('/api/admin/products/:productId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.productId)) return response.status(400).json({ error: 'Producto no válido.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+
+  const { data, error } = await session.client
+    .from('products')
+    .update({ is_active: false })
+    .eq('id', request.params.productId)
+    .select()
+    .maybeSingle();
+  if (error || !data) return response.status(404).json({ error: 'Producto no encontrado.' });
+  return response.json({ product: adminProduct(data), deactivated: true });
 }));
 
 app.get('/admin', asyncRoute(async (request, response) => {

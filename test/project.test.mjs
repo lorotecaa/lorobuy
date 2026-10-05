@@ -17,6 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
 const productHtml = fs.readFileSync(path.join(root, 'frontend', 'product.html'), 'utf8');
 const adminHtml = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
+const adminScript = fs.readFileSync(path.join(root, 'frontend', 'assets', 'admin.js'), 'utf8');
 const authConfirmHtml = fs.readFileSync(path.join(root, 'frontend', 'auth-confirm.html'), 'utf8');
 const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
 const builtProductHtml = fs.readFileSync(path.join(root, 'dist', 'product.html'), 'utf8');
@@ -234,7 +235,7 @@ test('email confirmation uses the configured public origin and a protected callb
 
 test('payment secrets stay on the backend and never enter storefront code', () => {
   const backendSource = `${server}\n${configSource}\n${paymentsSource}`;
-  const browserSource = `${html}\n${productHtml}\n${adminHtml}\n${authConfirmHtml}`;
+  const browserSource = `${html}\n${productHtml}\n${adminHtml}\n${adminScript}\n${authConfirmHtml}`;
   assert.match(backendSource, /SUPABASE_PUBLISHABLE_KEY/);
   assert.match(backendSource, /SUPABASE_SECRET_KEY/);
   assert.match(backendSource, /LEMON_SQUEEZY_API_KEY/);
@@ -280,7 +281,9 @@ test('admin products and prices use the existing catalog with an atomic Lemon ma
   assert.match(adminCatalogMigration, /insert into public\.payment_provider_variants/);
   assert.match(adminHtml, /data-panel="products"/);
   assert.match(adminHtml, /data-panel="prices"/);
-  assert.doesNotMatch(adminHtml, /SUPABASE_SECRET_KEY|service_role|sb_secret_/);
+  assert.match(adminHtml, /src="\/assets\/admin\.js"/);
+  assert.doesNotMatch(adminScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
+  assert.doesNotMatch(`${adminHtml}\n${adminScript}`, /SUPABASE_SECRET_KEY|service_role|sb_secret_/);
 });
 
 test('all referenced local assets exist', () => {

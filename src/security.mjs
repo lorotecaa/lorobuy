@@ -11,13 +11,16 @@ function firstInlineTag(html, tagName) {
   return match[1];
 }
 
-export function buildContentSecurityPolicy(html) {
+export function buildContentSecurityPolicy(html, { allowSameOriginScripts = false } = {}) {
   const styleHash = sha256(firstInlineTag(html, 'style'));
   const scriptHash = sha256(firstInlineTag(html, 'script'));
+  const scriptPolicy = allowSameOriginScripts
+    ? `script-src 'self' 'sha256-${scriptHash}'`
+    : `script-src 'sha256-${scriptHash}' 'strict-dynamic'`;
 
   return [
     "default-src 'none'",
-    `script-src 'sha256-${scriptHash}' 'strict-dynamic'`,
+    scriptPolicy,
     "script-src-attr 'none'",
     `style-src 'sha256-${styleHash}'`,
     "style-src-attr 'none'",

@@ -145,6 +145,7 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const IMAGE_PATTERN = /^assets\/[a-z0-9-]+\.(?:webp|png|jpe?g)$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
+const PRIMARY_ADMIN_EMAIL = 'loroteca98@gmail.com';
 
 function asyncRoute(handler) {
   return (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
@@ -816,6 +817,108 @@ app.delete('/api/admin/products/:productId', asyncRoute(async (request, response
     .maybeSingle();
   if (error || !data) return response.status(404).json({ error: 'Producto no encontrado.' });
   return response.json({ product: adminProduct(data), deactivated: true });
+}));
+
+async function readSupabaseAuthUsers() {
+  if (!config.supabaseSecretKey) throw new Error('Supabase administrative access is not configured.');
+  const users = [];
+  const perPage = 1_000;
+  for (let page = 1; page <= 10; page += 1) {
+    const response = await fetch(`${config.supabaseUrl}/auth/v1/admin/users?page=${page}&per_page=${perPage}`, {
+      headers: {
+        apikey: config.supabaseSecretKey,
+        Authorization: `Bearer ${config.supabaseSecretKey}`,
+      },
+    });
+    if (!response.ok) throw new Error('Unable to load users from Supabase Auth.');
+    const data = await response.json();
+    const batch = Array.isArray(data?.users) ? data.users : [];
+    users.push(...batch);
+    if (batch.length < perPage) break;
+  }
+  return users;
+}
+
+async function readSupabaseAuthUser(userId) {
+  if (!config.supabaseSecretKey) throw new Error('Supabase administrative access is not configured.');
+  const response = await fetch(`${config.supabaseUrl}/auth/v1/admin/users/${userId}`, {
+    headers: {
+      apikey: config.supabaseSecretKey,
+      Authorization: `Bearer ${config.supabaseSecretKey}`,
+    },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error('Unable to load user from Supabase Auth.');
+  const data = await response.json();
+  const user = data?.user ?? data;
+  return user?.id === userId ? user : null;
+}
+
+function adminUser(authUser, profile) {
+  const email = typeof authUser.email === 'string' ? authUser.email.toLowerCase() : null;
+  return {
+    id: authUser.id,
+    email,
+    displayName: profile?.display_name ?? authUser.user_metadata?.full_name ?? null,
+    role: profile?.role ?? 'customer',
+    emailConfirmed: Boolean(authUser.email_confirmed_at),
+    isAnonymous: Boolean(authUser.is_anonymous),
+    provider: authUser.app_metadata?.provider ?? authUser.identities?.[0]?.provider ?? 'email',
+    createdAt: authUser.created_at ?? profile?.created_at ?? null,
+    lastSignInAt: authUser.last_sign_in_at ?? null,
+    isPrimaryAdmin: email === PRIMARY_ADMIN_EMAIL,
+  };
+}
+
+app.get('/api/admin/users', asyncRoute(async (request, response) => {
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  if (!adminSupabase) return response.status(503).json({ error: 'La gestión de usuarios no está configurada.' });
+
+  const [authUsers, profilesResult] = await Promise.all([
+    readSupabaseAuthUsers(),
+    session.client.from('profiles').select('id,display_name,role,created_at,updated_at'),
+  ]);
+  if (profilesResult.error) throw new Error('Unable to load user profiles from Supabase.');
+  const profiles = new Map((profilesResult.data ?? []).map((profile) => [profile.id, profile]));
+  const users = authUsers
+    .map((user) => adminUser(user, profiles.get(user.id)))
+    .sort((left, right) => String(right.createdAt ?? '').localeCompare(String(left.createdAt ?? '')));
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({ users });
+}));
+
+app.patch('/api/admin/users/:userId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.userId)) return response.status(400).json({ error: 'Usuario no válido.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  if (!adminSupabase) return response.status(503).json({ error: 'La gestión de usuarios no está configurada.' });
+
+  const displayName = normalizeText(request.body?.displayName, 100);
+  const role = request.body?.role;
+  if (displayName === null || !['customer', 'admin'].includes(role)) {
+    return response.status(400).json({ error: 'Datos de usuario no válidos.' });
+  }
+  const target = await readSupabaseAuthUser(request.params.userId);
+  if (!target) return response.status(404).json({ error: 'Usuario no encontrado.' });
+  const email = target.email?.toLowerCase() ?? '';
+  if (email === PRIMARY_ADMIN_EMAIL && role !== 'admin') {
+    return response.status(409).json({ error: 'La cuenta administradora principal no puede perder su rol.' });
+  }
+  if (request.params.userId === session.user.id && role !== 'admin') {
+    return response.status(409).json({ error: 'No puedes quitar tu propio acceso administrativo.' });
+  }
+  if (role === 'admin' && !target.email_confirmed_at) {
+    return response.status(409).json({ error: 'El correo debe estar confirmado antes de asignar el rol administrador.' });
+  }
+
+  const { data, error } = await session.client.rpc('admin_update_user_profile', {
+    p_user_id: request.params.userId,
+    p_display_name: displayName || null,
+    p_role: role,
+  }).single();
+  if (error || !data) return response.status(400).json({ error: 'No fue posible actualizar el usuario.' });
+  return response.json({ user: adminUser(target, data) });
 }));
 
 app.get('/admin', asyncRoute(async (request, response) => {

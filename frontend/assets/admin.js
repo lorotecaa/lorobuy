@@ -1,9 +1,14 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const state = { products: [], categories: [], editingId: null, deactivateId: null };
+const state = {
+  products: [], categories: [], users: [], usersLoaded: false,
+  editingId: null, deactivateId: null, editingUserId: null,
+};
 const productDialog = $('.product-dialog');
 const confirmDialog = $('.confirm-dialog');
 const form = $('.product-form');
+let userDialog;
+let userForm;
 
 const money = (cents, currency = 'USD') => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -69,11 +74,114 @@ function toast(message, type = 'success') {
   toastTimer = setTimeout(() => { element.className = 'toast'; }, 3600);
 }
 
+function initializeUsersInterface() {
+  const usersLink = createElement('a');
+  usersLink.href = '#usuarios';
+  usersLink.dataset.view = 'users';
+  usersLink.append(createElement('span', { text: '♙' }), document.createTextNode('Usuarios'));
+  const storeLink = [...$$('.side-nav a')].find((link) => !link.dataset.view);
+  $('.side-nav').insertBefore(usersLink, storeLink ?? null);
+
+  const usersModule = [...$$('.module')].find((module) => $('h3', module)?.textContent.trim() === 'Usuarios');
+  if (usersModule) {
+    usersModule.classList.add('enabled');
+    usersModule.tabIndex = 0;
+    usersModule.setAttribute('role', 'button');
+    const badge = $('.soon', usersModule);
+    if (badge) { badge.className = 'ready'; badge.textContent = 'Activo'; }
+    usersModule.addEventListener('click', () => show('users'));
+    usersModule.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show('users'); }
+    });
+  }
+
+  const view = createElement('section', { className: 'view' });
+  view.dataset.panel = 'users';
+  view.hidden = true;
+  const head = createElement('div', { className: 'workspace-head' });
+  const heading = createElement('div');
+  heading.append(
+    createElement('h2', { text: 'Usuarios' }),
+    createElement('p', { text: 'Perfiles, verificación de correo y roles autorizados.' }),
+  );
+  const refresh = createElement('button', { className: 'secondary refresh-users', text: 'Actualizar', type: 'button' });
+  head.append(heading, refresh);
+  const toolbar = createElement('div', { className: 'toolbar' });
+  const searchLabel = createElement('label', { className: 'search' });
+  const search = createElement('input');
+  search.className = 'user-search';
+  search.type = 'search';
+  search.placeholder = 'Buscar por nombre o correo…';
+  searchLabel.append(search);
+  toolbar.append(searchLabel);
+  const card = createElement('div', { className: 'table-card' });
+  const scroll = createElement('div', { className: 'table-scroll' });
+  const table = createElement('table', { className: 'data-table' });
+  const header = createElement('thead');
+  const headerRow = createElement('tr');
+  for (const label of ['Usuario', 'Rol', 'Correo', 'Registro', 'Último acceso', 'Acciones']) {
+    headerRow.append(createElement('th', { text: label }));
+  }
+  header.append(headerRow);
+  const body = createElement('tbody', { className: 'users-body' });
+  body.append(emptyRow(6, 'Abre la sección para cargar los usuarios.'));
+  table.append(header, body); scroll.append(table); card.append(scroll); view.append(head, toolbar, card);
+  $('main').append(view);
+
+  userDialog = createElement('dialog', { className: 'user-dialog' });
+  userForm = createElement('form', { className: 'user-form' });
+  const modalHead = createElement('div', { className: 'modal-head' });
+  modalHead.append(
+    createElement('h2', { text: 'Editar usuario' }),
+    createElement('button', { className: 'close close-user', text: '×', type: 'button' }),
+  );
+  const modalBody = createElement('div', { className: 'modal-body' });
+  const grid = createElement('div', { className: 'form-grid' });
+  const nameField = createElement('div', { className: 'field full' });
+  const nameLabel = createElement('label', { text: 'Nombre visible' });
+  nameLabel.htmlFor = 'user-display-name';
+  const nameInput = createElement('input');
+  nameInput.id = 'user-display-name'; nameInput.name = 'displayName'; nameInput.maxLength = 100;
+  nameField.append(nameLabel, nameInput);
+  const emailField = createElement('div', { className: 'field full' });
+  emailField.append(createElement('label', { text: 'Correo electrónico' }));
+  const emailValue = createElement('input');
+  emailValue.name = 'email'; emailValue.disabled = true;
+  emailField.append(emailValue);
+  const roleField = createElement('div', { className: 'field full' });
+  roleField.append(createElement('label', { text: 'Rol' }));
+  const roleSelect = createElement('select');
+  roleSelect.name = 'role';
+  for (const [value, text] of [['customer', 'Cliente'], ['admin', 'Administrador']]) {
+    const option = createElement('option', { text }); option.value = value; roleSelect.append(option);
+  }
+  roleField.append(roleSelect, createElement('small', { className: 'role-help', text: 'Solo cuentas con correo confirmado pueden ser administradoras.' }));
+  grid.append(nameField, emailField, roleField);
+  modalBody.append(grid, createElement('p', { className: 'form-error user-error' }));
+  const modalFoot = createElement('div', { className: 'modal-foot' });
+  modalFoot.append(
+    createElement('button', { className: 'secondary cancel-user', text: 'Cancelar', type: 'button' }),
+    createElement('button', { className: 'primary save-user', text: 'Guardar usuario', type: 'submit' }),
+  );
+  userForm.append(modalHead, modalBody, modalFoot); userDialog.append(userForm); document.body.append(userDialog);
+
+  search.addEventListener('input', renderUsers);
+  refresh.addEventListener('click', () => loadUsers(true));
+  $('.close-user').addEventListener('click', () => userDialog.close());
+  $('.cancel-user').addEventListener('click', () => userDialog.close());
+  body.addEventListener('click', (event) => {
+    const edit = event.target.closest('[data-edit-user]');
+    if (edit) openUser(state.users.find((user) => user.id === edit.dataset.editUser));
+  });
+  userForm.addEventListener('submit', saveUser);
+}
+
 function show(view) {
   $$('.view').forEach((panel) => { panel.hidden = panel.dataset.panel !== view; });
   $$('[data-view]').forEach((link) => link.classList.toggle('active', link.dataset.view === view));
-  $('.page-title').textContent = view === 'products' ? 'Productos' : view === 'prices' ? 'Precios' : 'Administración';
+  $('.page-title').textContent = view === 'products' ? 'Productos' : view === 'prices' ? 'Precios' : view === 'users' ? 'Usuarios' : 'Administración';
   history.replaceState(null, '', `#${view === 'dashboard' ? 'resumen' : view}`);
+  if (view === 'users' && !state.usersLoaded) loadUsers().catch((error) => toast(error.message, 'error'));
 }
 
 function matches(product, query) {
@@ -169,6 +277,93 @@ function renderPrices() {
   }
 }
 
+function renderUsers() {
+  const body = $('.users-body');
+  if (!body) return;
+  const query = $('.user-search').value.trim().toLowerCase();
+  const users = state.users.filter((user) => [user.displayName, user.email, user.role]
+    .join(' ').toLowerCase().includes(query));
+  body.replaceChildren();
+  if (!users.length) return body.append(emptyRow(6, 'No hay usuarios que coincidan.'));
+
+  for (const user of users) {
+    const row = createElement('tr');
+    const identity = createElement('div', { className: 'product-cell' });
+    const avatar = createElement('img');
+    avatar.src = '/assets/favicon.png'; avatar.alt = '';
+    const details = createElement('div');
+    details.append(
+      createElement('strong', { text: user.displayName || 'Sin nombre' }),
+      createElement('small', { text: user.email || (user.isAnonymous ? 'Usuario invitado' : 'Sin correo') }),
+    );
+    identity.append(avatar, details);
+    appendCell(row, identity);
+    appendCell(row, createElement('span', {
+      className: `status ${user.role === 'admin' ? 'active' : 'draft'}`,
+      text: user.role === 'admin' ? 'Administrador' : 'Cliente',
+    }));
+    appendCell(row, createElement('span', {
+      className: `status ${user.emailConfirmed ? 'active' : 'draft'}`,
+      text: user.emailConfirmed ? 'Confirmado' : 'Pendiente',
+    }));
+    appendCell(row, user.createdAt ? new Date(user.createdAt).toLocaleDateString('es-CO') : '—');
+    appendCell(row, user.lastSignInAt ? new Date(user.lastSignInAt).toLocaleDateString('es-CO') : 'Nunca');
+    const edit = createElement('button', { className: 'small-button', text: 'Editar', type: 'button' });
+    edit.dataset.editUser = user.id;
+    appendCell(row, edit);
+    body.append(row);
+  }
+}
+
+async function loadUsers(force = false) {
+  if (state.usersLoaded && !force) return;
+  const body = $('.users-body');
+  if (body) { body.replaceChildren(); body.append(emptyRow(6, 'Cargando usuarios…')); }
+  const data = await api('/api/admin/users');
+  state.users = data.users;
+  state.usersLoaded = true;
+  renderUsers();
+}
+
+function openUser(user) {
+  if (!user) return;
+  state.editingUserId = user.id;
+  userForm.reset();
+  userForm.elements.displayName.value = user.displayName || '';
+  userForm.elements.email.value = user.email || 'Sin correo';
+  userForm.elements.role.value = user.role;
+  userForm.elements.role.disabled = user.isPrimaryAdmin;
+  $('.role-help').textContent = user.isPrimaryAdmin
+    ? 'La cuenta administradora principal está protegida.'
+    : user.emailConfirmed
+      ? 'Este usuario puede recibir un rol administrativo.'
+      : 'Debe confirmar su correo antes de poder ser administrador.';
+  $('.user-error').textContent = '';
+  userDialog.showModal();
+}
+
+async function saveUser(event) {
+  event.preventDefault();
+  const button = $('.save-user');
+  const user = state.users.find((item) => item.id === state.editingUserId);
+  try {
+    const role = user.isPrimaryAdmin ? 'admin' : userForm.elements.role.value;
+    button.disabled = true;
+    await api(`/api/admin/users/${user.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ displayName: userForm.elements.displayName.value.trim(), role }),
+    });
+    userDialog.close();
+    state.usersLoaded = false;
+    await loadUsers(true);
+    toast('Usuario actualizado correctamente.');
+  } catch (error) {
+    $('.user-error').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function render() { renderProducts(); renderPrices(); }
 
 async function loadCatalog() {
@@ -196,7 +391,9 @@ async function load() {
     $('.admin-name').textContent = session.user.displayName || 'Administrador';
     $('.admin-email').textContent = session.user.email || '';
     await loadCatalog();
-    show(location.hash === '#productos' ? 'products' : location.hash === '#precios' ? 'prices' : 'dashboard');
+    show(location.hash === '#productos' ? 'products'
+      : location.hash === '#precios' ? 'prices'
+        : location.hash === '#usuarios' ? 'users' : 'dashboard');
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -311,6 +508,7 @@ $('.prices-body').addEventListener('click', async (event) => {
   }
 });
 
+initializeUsersInterface();
 $('.product-search').addEventListener('input', renderProducts);
 $('.price-search').addEventListener('input', renderPrices);
 $$('[data-view]').forEach((link) => link.addEventListener('click', (event) => {

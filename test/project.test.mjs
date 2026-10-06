@@ -35,6 +35,7 @@ const paymentsMigration = fs.readFileSync(path.join(root, 'supabase', 'migration
 const nordicsPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610030002_map_nordicos_lemon_test_variant.sql'), 'utf8');
 const catalogPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040001_map_catalog_lemon_test_variant.sql'), 'utf8');
 const adminCatalogMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040002_admin_products_prices.sql'), 'utf8');
+const adminUsersMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040003_admin_users.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -284,6 +285,20 @@ test('admin products and prices use the existing catalog with an atomic Lemon ma
   assert.match(adminHtml, /src="\/assets\/admin\.js"/);
   assert.doesNotMatch(adminScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
   assert.doesNotMatch(`${adminHtml}\n${adminScript}`, /SUPABASE_SECRET_KEY|service_role|sb_secret_/);
+});
+
+test('admin users combine Supabase Auth with protected profile role management', () => {
+  assert.match(server, /app\.get\('\/api\/admin\/users'/);
+  assert.match(server, /app\.patch\('\/api\/admin\/users\/:userId'/);
+  assert.match(server, /\/auth\/v1\/admin\/users\?page=/);
+  assert.match(server, /Authorization: `Bearer \$\{config\.supabaseSecretKey\}`/);
+  assert.match(server, /\.rpc\('admin_update_user_profile'/);
+  assert.match(adminUsersMigration, /security definer/);
+  assert.match(adminUsersMigration, /not public\.is_admin\(auth\.uid\(\)\)/);
+  assert.match(adminUsersMigration, /target_email = 'loroteca98@gmail\.com'/);
+  assert.match(adminUsersMigration, /target_confirmed_at is null/);
+  assert.match(adminScript, /data\.users/);
+  assert.match(adminScript, /data-edit-user/);
 });
 
 test('all referenced local assets exist', () => {

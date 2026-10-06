@@ -83,6 +83,7 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let webhookRpcPayload;
   let adminCreatePayload;
   let adminUpdatePayload;
+  let adminUserUpdatePayload;
   const readJsonBody = async (request) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -108,7 +109,23 @@ test('Render server serves the unchanged storefront and reads catalog data from 
         price_cents: adminCreatePayload.p_price_cents,
       }]));
     }
-    assert.equal(request.headers.apikey, 'sb_publishable_mock');
+    if (request.url === '/rest/v1/rpc/admin_update_user_profile') {
+      assert.equal(request.headers.apikey, 'sb_publishable_mock');
+      assert.equal(request.headers.authorization, 'Bearer admin-token');
+      adminUserUpdatePayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({
+        id: adminUserUpdatePayload.p_user_id,
+        display_name: adminUserUpdatePayload.p_display_name,
+        avatar_url: null,
+        role: adminUserUpdatePayload.p_role,
+        created_at: '2026-10-03T12:00:00.000Z',
+        updated_at: '2026-10-04T12:00:00.000Z',
+      }));
+    }
+    if (!request.url?.startsWith('/auth/v1/admin/users')) {
+      assert.equal(request.headers.apikey, 'sb_publishable_mock');
+    }
     if (request.method === 'POST' && request.url?.startsWith('/auth/v1/signup')) {
       signupRequestUrl = request.url;
       signupPayload = await readJsonBody(request);
@@ -155,6 +172,22 @@ test('Render server serves the unchanged storefront and reads catalog data from 
         user: customerUser,
       }));
     }
+    if (request.method === 'GET' && request.url?.startsWith('/auth/v1/admin/users?')) {
+      assert.equal(request.headers.apikey, 'sb_secret_mock');
+      assert.equal(request.headers.authorization, 'Bearer sb_secret_mock');
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({ users: [adminUser, customerUser], aud: 'authenticated' }));
+    }
+    if (request.method === 'GET' && request.url === `/auth/v1/admin/users/${adminUser.id}`) {
+      assert.equal(request.headers.apikey, 'sb_secret_mock');
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({ user: adminUser }));
+    }
+    if (request.method === 'GET' && request.url === `/auth/v1/admin/users/${customerUser.id}`) {
+      assert.equal(request.headers.apikey, 'sb_secret_mock');
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({ user: customerUser }));
+    }
     if (request.url === '/auth/v1/user') {
       response.setHeader('Content-Type', 'application/json');
       if (request.headers.authorization === 'Bearer admin-token') return response.end(JSON.stringify(adminUser));
@@ -166,7 +199,8 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     if (request.url?.startsWith('/rest/v1/profiles')) {
       response.setHeader('Content-Type', 'application/json');
       if (request.headers.authorization === 'Bearer admin-token') {
-        return response.end(JSON.stringify({ id: adminUser.id, display_name: 'Loro Admin', avatar_url: null, role: 'admin' }));
+        const profile = { id: adminUser.id, display_name: 'Loro Admin', avatar_url: null, role: 'admin', created_at: '2026-10-02T12:00:00.000Z' };
+        return response.end(JSON.stringify(request.url.includes('id=eq.') ? profile : [profile]));
       }
       if (request.headers.authorization === 'Bearer customer-token') {
         return response.end(JSON.stringify({ id: customerUser.id, display_name: 'Cliente', avatar_url: null, role: 'customer' }));
@@ -415,6 +449,36 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(deactivateResponse.status, 200);
   assert.equal((await deactivateResponse.json()).deactivated, true);
   assert.equal(adminUpdatePayload.is_active, false);
+
+  const forbiddenUsersResponse = await fetch(`${appOrigin}/api/admin/users`, {
+    headers: { Cookie: 'lorobuy_access=customer-token' },
+  });
+  assert.equal(forbiddenUsersResponse.status, 403);
+
+  const usersResponse = await fetch(`${appOrigin}/api/admin/users`, {
+    headers: { Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(usersResponse.status, 200);
+  const usersPayload = await usersResponse.json();
+  assert.equal(usersPayload.users.length, 2);
+  assert.equal(usersPayload.users.find((user) => user.email === 'loroteca98@gmail.com').isPrimaryAdmin, true);
+
+  const updateUserResponse = await fetch(`${appOrigin}/api/admin/users/${customerUser.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+    body: JSON.stringify({ displayName: 'Cliente autorizado', role: 'admin' }),
+  });
+  assert.equal(updateUserResponse.status, 200);
+  assert.equal((await updateUserResponse.json()).user.role, 'admin');
+  assert.equal(adminUserUpdatePayload.p_user_id, customerUser.id);
+  assert.equal(adminUserUpdatePayload.p_role, 'admin');
+
+  const protectedAdminResponse = await fetch(`${appOrigin}/api/admin/users/${adminUser.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+    body: JSON.stringify({ displayName: 'Loro Admin', role: 'customer' }),
+  });
+  assert.equal(protectedAdminResponse.status, 409);
 
   const crossOriginResponse = await fetch(`${appOrigin}/api/newsletter`, {
     method: 'POST',

@@ -220,6 +220,8 @@ test('packs CTA opens a complete Supabase-backed collection page', () => {
   assert.match(packsCollectionScript, /function createSequentialPlayer/);
   assert.match(packsCollectionScript, /video\.addEventListener\('ended', handleEnded\)/);
   assert.match(packsCollectionScript, /product\.slug === 'mega-pack-dioses-nordicos'/);
+  assert.match(packsCollectionScript, /assets\/previews\/mega-pack-dioses-nordicos\.mp4/);
+  assert.match(packsCollectionScript, /video\.addEventListener\('loadeddata', handleReady\)/);
   assert.doesNotMatch(packsCollectionScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
 });
 

@@ -29,6 +29,13 @@ function safeImage(value) {
 }
 
 function safeVideo(value) {
+  const normalized = String(value || '');
+  if (/\/product-media\/mega-pack-dioses-nordicos\.mp4(?:\?.*)?$/i.test(normalized)) {
+    return '/assets/previews/mega-pack-dioses-nordicos.mp4?v=20261006-local-delivery-1';
+  }
+  if (/\/product-media\/hero\.mp4(?:\?.*)?$/i.test(normalized)) {
+    return '/assets/hero.mp4?v=20261006-local-delivery-1';
+  }
   const local = /^\/?assets\/[a-z0-9/_-]+\.(?:mp4|webm)(?:\?v=[a-z0-9-]+)?$/i.test(value || '');
   const storage = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/product-media\/[a-z0-9/_-]+\.(?:mp4|webm|mov)(?:\?.*)?$/i.test(value || '');
   return local || storage ? value : '/assets/hero.mp4?v=20261005-stream-1';
@@ -55,14 +62,13 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
   let visible = false;
   let destroyed = false;
   let failedSources = 0;
-  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   video.autoplay = true;
   video.defaultMuted = true;
   video.muted = true;
 
   const updateIndex = () => onIndex?.(index, sources.length, sources[index]);
   const play = () => {
-    if (destroyed || reducedMotion || !visible || !sources.length) return;
+    if (destroyed || !visible || !sources.length) return;
     video.play().catch(() => {});
   };
   const load = (nextIndex) => {
@@ -76,6 +82,7 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
     onProgress?.(0);
     play();
   };
+  const handleReady = () => video.classList.add('is-ready');
   const handlePlaying = () => video.classList.add('is-playing');
   const handleCanPlay = () => play();
   const handleEnded = () => {
@@ -91,6 +98,7 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
     const ratio = Number.isFinite(video.duration) && video.duration > 0 ? video.currentTime / video.duration : 0;
     onProgress?.(Math.min(1, Math.max(0, ratio)));
   };
+  video.addEventListener('loadeddata', handleReady);
   video.addEventListener('playing', handlePlaying);
   video.addEventListener('canplay', handleCanPlay);
   video.addEventListener('ended', handleEnded);
@@ -110,6 +118,7 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
       destroyed = true;
       observer.disconnect();
       video.pause();
+      video.removeEventListener('loadeddata', handleReady);
       video.removeEventListener('playing', handlePlaying);
       video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('ended', handleEnded);
@@ -257,7 +266,7 @@ function renderShowcase(products) {
   }
 
   const items = $$('.showcase-item', showcase);
-  if (!items.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (!items.length) return;
   let activeIndex = -1;
   let visible = false;
   const activate = (nextIndex) => {
@@ -266,7 +275,7 @@ function renderShowcase(products) {
     const video = $('video', item);
     showcaseActiveVideo?.pause();
     items.forEach((entry) => entry.classList.remove('is-live'));
-    $$('video', showcase).forEach((entry) => entry.classList.remove('is-playing'));
+    $$('video', showcase).forEach((entry) => entry.classList.remove('is-ready', 'is-playing'));
     activeIndex = nextIndex % items.length;
     item.classList.add('is-live');
     showcaseActiveVideo = video;
@@ -278,6 +287,9 @@ function renderShowcase(products) {
     }
     video.oncanplay = () => {
       if (visible && showcaseActiveVideo === video) video.play().then(() => video.classList.add('is-playing')).catch(() => {});
+    };
+    video.onloadeddata = () => {
+      if (showcaseActiveVideo === video) video.classList.add('is-ready');
     };
     try { video.currentTime = 0; } catch {}
     video.play().then(() => video.classList.add('is-playing')).catch(() => {});

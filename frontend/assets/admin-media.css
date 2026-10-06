@@ -106,6 +106,17 @@
 .status.order-cancelled { background: #ff5b831a; color: #ff7899; }
 .status.order-refunded { background: #8065ef20; color: #b9aaff; }
 .orders-limit-note { margin: 11px 3px 0; color: var(--muted); font-size: 11px; }
+.order-actions { flex-wrap: wrap; min-width: 190px; }
+.checkout-active-note {
+  padding: 5px 8px;
+  border: 1px solid #ffca5c42;
+  border-radius: 999px;
+  color: #ffca5c;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.order-action-dialog .modal-body p { margin: 0; color: #cbc7d4; line-height: 1.6; }
+.order-action-dialog .order-action-error { min-height: 18px; margin-top: 14px; color: var(--danger); }
 
 .order-dialog { width: min(920px, calc(100% - 28px)); max-height: 92vh; }
 .order-dialog > div { display: flex; max-height: 92vh; flex-direction: column; }

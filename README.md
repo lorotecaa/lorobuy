@@ -81,6 +81,8 @@ Customers can obtain a 60-second signed download URL only when a completed order
 
 The checkout API fixes the price from Supabase, disables checkout discounts, and passes a random attempt token. The webhook verifies its HMAC-SHA256 signature, store, mode, variant, currency, subtotal, order, and token. The database completes the order and records the event in one transaction; a unique event key makes retries idempotent.
 
+Apply `202610060002_admin_order_actions.sql` to enable the protected administrator actions for unpaid orders. Pending orders can only be cancelled after the 30-minute Lemon checkout has expired plus a five-minute safety margin. Permanent deletion is limited to cancelled test-mode orders with no payment or webhook event; paid orders remain immutable and must use Lemon Squeezy's refund workflow.
+
 Guest purchases use an anonymous Supabase session, so registration is not required. The same secure browser session can retrieve the completed order and request a 60-second URL from the private `product-files` bucket.
 
 ## 4. Deploy to Render

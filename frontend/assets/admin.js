@@ -3,7 +3,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const state = {
   products: [], categories: [], users: [], usersLoaded: false, orders: [], ordersLoaded: false, orderSummary: null,
   media: [], mediaCover: null, editingId: null, deactivateId: null, editingUserId: null,
-  mediaProductId: null, activeOrderId: null,
+  mediaProductId: null, activeOrderId: null, orderAction: null,
 };
 const productDialog = $('.product-dialog');
 const confirmDialog = $('.confirm-dialog');
@@ -12,6 +12,7 @@ let userDialog;
 let userForm;
 let mediaDialog;
 let orderDialog;
+let orderActionDialog;
 
 const money = (cents, currency = 'USD') => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -268,15 +269,42 @@ function initializeOrdersInterface() {
   modalFoot.append(createElement('button', { className: 'secondary close-order', text: 'Cerrar', type: 'button' }));
   shell.append(modalHead, modalBody, modalFoot); orderDialog.append(shell); document.body.append(orderDialog);
 
+  orderActionDialog = createElement('dialog', { className: 'confirm-dialog order-action-dialog' });
+  const actionShell = createElement('div');
+  const actionHead = createElement('div', { className: 'modal-head' });
+  actionHead.append(
+    createElement('h2', { className: 'order-action-title', text: 'Gestionar pedido' }),
+    createElement('button', { className: 'close close-order-action', text: '×', type: 'button' }),
+  );
+  const actionBody = createElement('div', { className: 'modal-body' });
+  actionBody.append(
+    createElement('p', { className: 'order-action-copy' }),
+    createElement('p', { className: 'form-error order-action-error' }),
+  );
+  const actionFoot = createElement('div', { className: 'modal-foot' });
+  actionFoot.append(
+    createElement('button', { className: 'secondary close-order-action', text: 'Volver', type: 'button' }),
+    createElement('button', { className: 'danger confirm-order-action', text: 'Confirmar', type: 'button' }),
+  );
+  actionShell.append(actionHead, actionBody, actionFoot);
+  orderActionDialog.append(actionShell); document.body.append(orderActionDialog);
+
   search.addEventListener('input', renderOrders);
   status.addEventListener('change', renderOrders);
   refresh.addEventListener('click', () => loadOrders(true));
   body.addEventListener('click', (event) => {
     const detail = event.target.closest('[data-order-detail]');
+    const cancel = event.target.closest('[data-order-cancel]');
+    const remove = event.target.closest('[data-order-delete]');
     if (detail) openOrder(state.orders.find((order) => order.id === detail.dataset.orderDetail));
+    if (cancel) openOrderAction(state.orders.find((order) => order.id === cancel.dataset.orderCancel), 'cancel');
+    if (remove) openOrderAction(state.orders.find((order) => order.id === remove.dataset.orderDelete), 'delete');
   });
   $$('.close-order', orderDialog).forEach((button) => button.addEventListener('click', () => orderDialog.close()));
   orderDialog.addEventListener('close', () => { state.activeOrderId = null; });
+  $$('.close-order-action', orderActionDialog).forEach((button) => button.addEventListener('click', () => orderActionDialog.close()));
+  $('.confirm-order-action', orderActionDialog).addEventListener('click', executeOrderAction);
+  orderActionDialog.addEventListener('close', () => { state.orderAction = null; });
 }
 
 function initializeMediaInterface() {
@@ -665,10 +693,61 @@ function renderOrders() {
     appendCell(row, money(order.totalCents, order.currency), 'order-total');
     appendCell(row, orderStatusBadge(order));
     appendCell(row, formatDateTime(order.createdAt), 'order-date');
+    const actions = createElement('div', { className: 'actions order-actions' });
     const detail = createElement('button', { className: 'small-button', text: 'Ver detalle', type: 'button' });
     detail.dataset.orderDetail = order.id;
-    appendCell(row, detail);
+    actions.append(detail);
+    if (order.controls?.canCancel) {
+      const cancel = createElement('button', { className: 'small-button remove', text: 'Cancelar', type: 'button' });
+      cancel.dataset.orderCancel = order.id; actions.append(cancel);
+    }
+    if (order.controls?.canDelete) {
+      const remove = createElement('button', { className: 'small-button remove', text: 'Eliminar', type: 'button' });
+      remove.dataset.orderDelete = order.id; actions.append(remove);
+    }
+    if (order.controls?.checkoutActive) {
+      const active = createElement('small', { className: 'checkout-active-note', text: 'Checkout activo' });
+      active.title = 'La cancelación estará disponible cuando expire el checkout.';
+      actions.append(active);
+    }
+    appendCell(row, actions);
     body.append(row);
+  }
+}
+
+function openOrderAction(order, action) {
+  if (!order || !['cancel', 'delete'].includes(action)) return;
+  state.orderAction = { orderId: order.id, action };
+  const shortId = `#${order.id.slice(0, 8).toUpperCase()}`;
+  const deleting = action === 'delete';
+  $('.order-action-title').textContent = deleting ? `Eliminar ${shortId}` : `Cancelar ${shortId}`;
+  $('.order-action-copy').textContent = deleting
+    ? 'Este pedido de prueba cancelado se eliminará definitivamente de Supabase. Esta acción no afecta ninguna compra pagada.'
+    : 'El pedido quedará cancelado y su checkout vencido no podrá confirmar una compra. No se realizará ningún cobro ni reembolso.';
+  $('.order-action-error').textContent = '';
+  const button = $('.confirm-order-action');
+  button.textContent = deleting ? 'Sí, eliminar' : 'Sí, cancelar';
+  orderActionDialog.showModal();
+}
+
+async function executeOrderAction() {
+  if (!state.orderAction) return;
+  const { orderId, action } = state.orderAction;
+  const button = $('.confirm-order-action');
+  button.disabled = true; $('.order-action-error').textContent = '';
+  try {
+    await api(`/api/admin/orders/${orderId}${action === 'cancel' ? '/cancel' : ''}`, {
+      method: action === 'cancel' ? 'POST' : 'DELETE',
+    });
+    orderActionDialog.close();
+    if (orderDialog.open) orderDialog.close();
+    state.ordersLoaded = false;
+    await loadOrders(true);
+    toast(action === 'cancel' ? 'Pedido cancelado correctamente.' : 'Pedido de prueba eliminado.');
+  } catch (error) {
+    $('.order-action-error').textContent = error.message;
+  } finally {
+    button.disabled = false;
   }
 }
 

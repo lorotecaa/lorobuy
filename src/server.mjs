@@ -860,6 +860,14 @@ function adminOrder(row, authUser) {
   const events = [...(Array.isArray(row.payment_events) ? row.payment_events : [])]
     .sort((left, right) => String(right.received_at ?? '').localeCompare(String(left.received_at ?? '')));
   const latestAttempt = attempts[0] ?? null;
+  const checkoutCreatedAt = latestAttempt?.created_at ? new Date(latestAttempt.created_at).getTime() : Number.NaN;
+  const checkoutIsActive = latestAttempt?.status === 'checkout_created'
+    && Number.isFinite(checkoutCreatedAt)
+    && Date.now() < checkoutCreatedAt + (35 * 60 * 1000);
+  const hasPaidAttempt = attempts.some((attempt) => attempt.status === 'paid' || attempt.external_order_id);
+  const isUnpaidTestOrder = attempts.length > 0
+    && attempts.every((attempt) => attempt.test_mode === true
+      && attempt.status !== 'paid' && !attempt.external_order_id);
   const email = row.customer_email ?? authUser?.email?.toLowerCase() ?? null;
   const displayName = authUser?.user_metadata?.full_name ?? authUser?.user_metadata?.name ?? null;
   return {
@@ -876,6 +884,11 @@ function adminOrder(row, authUser) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
+    controls: {
+      canCancel: ['draft', 'pending'].includes(row.status) && !hasPaidAttempt && !checkoutIsActive,
+      canDelete: row.status === 'cancelled' && isUnpaidTestOrder && events.length === 0,
+      checkoutActive: checkoutIsActive,
+    },
     items: (Array.isArray(row.order_items) ? row.order_items : []).map((item) => ({
       id: item.id,
       productId: item.product_id,
@@ -946,6 +959,50 @@ app.get('/api/admin/orders', asyncRoute(async (request, response) => {
   };
   response.set('Cache-Control', 'private, no-store, max-age=0');
   return response.json({ orders, summary, limit: 500 });
+}));
+
+app.post('/api/admin/orders/:orderId/cancel', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.orderId)) return response.status(400).json({ error: 'Pedido no válido.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+
+  const { data, error } = await session.client.rpc('admin_cancel_order', {
+    p_order_id: request.params.orderId,
+  });
+  if (error) {
+    const message = String(error.message ?? '');
+    if (message.includes('checkout is still active')) {
+      return response.status(409).json({ error: 'El checkout todavía está activo. Podrás cancelarlo 35 minutos después de crearlo.' });
+    }
+    if (message.includes('paid orders') || message.includes('only unpaid orders')) {
+      return response.status(409).json({ error: 'Solo se pueden cancelar pedidos pendientes que no tengan un pago.' });
+    }
+    return response.status(404).json({ error: 'El pedido no existe o ya no puede cancelarse.' });
+  }
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({ orderId: request.params.orderId, status: data ?? 'cancelled' });
+}));
+
+app.delete('/api/admin/orders/:orderId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.orderId)) return response.status(400).json({ error: 'Pedido no válido.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+
+  const { data, error } = await session.client.rpc('admin_delete_test_order', {
+    p_order_id: request.params.orderId,
+  });
+  if (error) {
+    const message = String(error.message ?? '');
+    if (message.includes('must be cancelled first')) {
+      return response.status(409).json({ error: 'Primero debes cancelar el pedido.' });
+    }
+    if (message.includes('only unpaid test orders') || message.includes('payment events')) {
+      return response.status(409).json({ error: 'Solo se pueden eliminar pedidos de prueba cancelados y sin ningún pago.' });
+    }
+    return response.status(404).json({ error: 'El pedido no existe o no puede eliminarse.' });
+  }
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({ orderId: request.params.orderId, result: data ?? 'deleted' });
 }));
 
 function validatedProductPayload(body, { partial = false } = {}) {

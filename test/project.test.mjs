@@ -43,6 +43,7 @@ const adminCatalogMigration = fs.readFileSync(path.join(root, 'supabase', 'migra
 const adminUsersMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040003_admin_users.sql'), 'utf8');
 const productMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610050001_product_media_gallery.sql'), 'utf8');
 const sharedMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060001_shared_product_media.sql'), 'utf8');
+const adminOrderActionsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060002_admin_order_actions.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -341,17 +342,26 @@ test('admin users combine Supabase Auth with protected profile role management',
   assert.match(adminScript, /data-edit-user/);
 });
 
-test('admin orders expose a protected read-only payment history', () => {
+test('admin orders expose payment history and tightly scoped unpaid-order actions', () => {
   assert.match(server, /app\.get\('\/api\/admin\/orders'/);
   assert.match(server, /\.from\('orders'\)/);
   assert.match(server, /payment_attempts\(id,provider,status/);
   assert.match(server, /payment_events\(id,provider,event_type/);
   assert.match(server, /registeredTotalCents/);
-  assert.doesNotMatch(server, /app\.(?:patch|post|delete)\('\/api\/admin\/orders/);
+  assert.match(server, /app\.post\('\/api\/admin\/orders\/:orderId\/cancel'/);
+  assert.match(server, /app\.delete\('\/api\/admin\/orders\/:orderId'/);
+  assert.match(server, /\.rpc\('admin_cancel_order'/);
+  assert.match(server, /\.rpc\('admin_delete_test_order'/);
+  assert.match(adminOrderActionsMigration, /created_at > now\(\) - interval '35 minutes'/);
+  assert.match(adminOrderActionsMigration, /selected_order\.status <> 'cancelled'/);
+  assert.match(adminOrderActionsMigration, /test_mode = false or status = 'paid' or external_order_id is not null/);
+  assert.match(adminOrderActionsMigration, /not public\.is_admin\(auth\.uid\(\)\)/);
   assert.match(adminScript, /initializeOrdersInterface/);
   assert.match(adminScript, /data-order-detail/);
   assert.match(adminScript, /Webhook validado/);
   assert.match(adminScript, /Modo prueba/);
+  assert.match(adminScript, /dataset\.orderCancel/);
+  assert.match(adminScript, /dataset\.orderDelete/);
   assert.doesNotMatch(adminScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
 });
 

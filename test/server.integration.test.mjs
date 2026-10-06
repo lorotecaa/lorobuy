@@ -130,6 +130,35 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       processed_at: '2026-10-05T12:02:00.000Z',
     }],
   };
+  const pendingOrder = {
+    ...completedOrder,
+    id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    status: 'pending',
+    total_cents: 5900,
+    customer_email: null,
+    created_at: '2026-10-04T10:00:00.000Z',
+    updated_at: '2026-10-04T10:01:00.000Z',
+    completed_at: null,
+    order_items: [{
+      ...completedOrder.order_items[0],
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      order_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      unit_price_cents: 5900,
+      subtotal_cents: 5900,
+    }],
+    payment_attempts: [{
+      ...completedOrder.payment_attempts[0],
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      status: 'checkout_created',
+      external_checkout_id: 'checkout_pending',
+      external_order_id: null,
+      expected_amount_cents: 5900,
+      created_at: '2026-10-04T10:00:00.000Z',
+      updated_at: '2026-10-04T10:01:00.000Z',
+      paid_at: null,
+    }],
+    payment_events: [],
+  };
   let signupPayload;
   let signupRequestUrl;
   let resendPayload;
@@ -139,6 +168,8 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let adminCreatePayload;
   let adminUpdatePayload;
   let adminUserUpdatePayload;
+  let adminCancelOrderPayload;
+  let adminDeleteOrderPayload;
   const readJsonBody = async (request) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -177,6 +208,16 @@ test('Render server serves the unchanged storefront and reads catalog data from 
         created_at: '2026-10-03T12:00:00.000Z',
         updated_at: '2026-10-04T12:00:00.000Z',
       }));
+    }
+    if (request.url === '/rest/v1/rpc/admin_cancel_order') {
+      adminCancelOrderPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify('cancelled'));
+    }
+    if (request.url === '/rest/v1/rpc/admin_delete_test_order') {
+      adminDeleteOrderPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify('deleted'));
     }
     if (!request.url?.startsWith('/auth/v1/admin/users')) {
       assert.equal(request.headers.apikey, 'sb_publishable_mock');
@@ -268,7 +309,7 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     }
     if (request.url?.startsWith('/rest/v1/orders')) {
       response.setHeader('Content-Type', 'application/json');
-      return response.end(JSON.stringify([completedOrder]));
+      return response.end(JSON.stringify([completedOrder, pendingOrder]));
     }
     if (request.url?.startsWith('/rest/v1/categories')) {
       response.setHeader('Content-Type', 'application/json');
@@ -539,14 +580,41 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(ordersResponse.status, 200);
   assert.equal(ordersResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
   const ordersPayload = await ordersResponse.json();
-  assert.equal(ordersPayload.orders.length, 1);
+  assert.equal(ordersPayload.orders.length, 2);
   assert.equal(ordersPayload.orders[0].customer.email, 'cliente@example.com');
   assert.equal(ordersPayload.orders[0].items[0].productName, 'Mock Product');
   assert.equal(ordersPayload.orders[0].payment.status, 'paid');
   assert.equal(ordersPayload.orders[0].events[0].type, 'order_created');
+  assert.equal(ordersPayload.orders[0].controls.canCancel, false);
+  assert.equal(ordersPayload.orders[0].controls.canDelete, false);
+  assert.equal(ordersPayload.orders[1].controls.canCancel, true);
+  assert.equal(ordersPayload.orders[1].controls.canDelete, false);
   assert.equal(ordersPayload.summary.completed, 1);
   assert.equal(ordersPayload.summary.registeredTotalCents, 2499);
-  assert.equal(ordersPayload.summary.testMode, 1);
+  assert.equal(ordersPayload.summary.pending, 1);
+  assert.equal(ordersPayload.summary.testMode, 2);
+
+  const forbiddenCancelOrderResponse = await fetch(`${appOrigin}/api/admin/orders/${pendingOrder.id}/cancel`, {
+    method: 'POST',
+    headers: { Origin: appOrigin, Cookie: 'lorobuy_access=customer-token' },
+  });
+  assert.equal(forbiddenCancelOrderResponse.status, 403);
+
+  const cancelOrderResponse = await fetch(`${appOrigin}/api/admin/orders/${pendingOrder.id}/cancel`, {
+    method: 'POST',
+    headers: { Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(cancelOrderResponse.status, 200);
+  assert.equal((await cancelOrderResponse.json()).status, 'cancelled');
+  assert.equal(adminCancelOrderPayload.p_order_id, pendingOrder.id);
+
+  const deleteOrderResponse = await fetch(`${appOrigin}/api/admin/orders/${pendingOrder.id}`, {
+    method: 'DELETE',
+    headers: { Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(deleteOrderResponse.status, 200);
+  assert.equal((await deleteOrderResponse.json()).result, 'deleted');
+  assert.equal(adminDeleteOrderPayload.p_order_id, pendingOrder.id);
 
   const updateUserResponse = await fetch(`${appOrigin}/api/admin/users/${customerUser.id}`, {
     method: 'PATCH',

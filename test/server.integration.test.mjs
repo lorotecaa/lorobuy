@@ -88,6 +88,48 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     email: 'cliente@example.com',
     user_metadata: { full_name: 'Cliente' },
   };
+  const completedOrder = {
+    id: '44444444-4444-4444-8444-444444444444',
+    user_id: customerUser.id,
+    status: 'completed',
+    currency: 'USD',
+    total_cents: 2499,
+    customer_email: 'cliente@example.com',
+    created_at: '2026-10-05T12:00:00.000Z',
+    updated_at: '2026-10-05T12:02:00.000Z',
+    completed_at: '2026-10-05T12:02:00.000Z',
+    order_items: [{
+      id: '88888888-8888-4888-8888-888888888888',
+      product_id: product.id,
+      product_name: product.name,
+      quantity: 1,
+      unit_price_cents: 2499,
+      subtotal_cents: 2499,
+      currency: 'USD',
+      products: { slug: product.slug, image_path: product.image_path },
+    }],
+    payment_attempts: [{
+      id: '99999999-9999-4999-8999-999999999999',
+      provider: 'lemon_squeezy',
+      status: 'paid',
+      external_checkout_id: 'checkout_mock',
+      external_order_id: 'order_mock',
+      expected_amount_cents: 2499,
+      currency: 'USD',
+      test_mode: true,
+      created_at: '2026-10-05T12:00:00.000Z',
+      updated_at: '2026-10-05T12:02:00.000Z',
+      paid_at: '2026-10-05T12:02:00.000Z',
+    }],
+    payment_events: [{
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      provider: 'lemon_squeezy',
+      event_type: 'order_created',
+      provider_object_id: 'order_mock',
+      received_at: '2026-10-05T12:02:00.000Z',
+      processed_at: '2026-10-05T12:02:00.000Z',
+    }],
+  };
   let signupPayload;
   let signupRequestUrl;
   let resendPayload;
@@ -223,6 +265,10 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       }
       response.statusCode = 401;
       return response.end(JSON.stringify({ message: 'invalid token' }));
+    }
+    if (request.url?.startsWith('/rest/v1/orders')) {
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify([completedOrder]));
     }
     if (request.url?.startsWith('/rest/v1/categories')) {
       response.setHeader('Content-Type', 'application/json');
@@ -481,6 +527,26 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   const usersPayload = await usersResponse.json();
   assert.equal(usersPayload.users.length, 2);
   assert.equal(usersPayload.users.find((user) => user.email === 'loroteca98@gmail.com').isPrimaryAdmin, true);
+
+  const forbiddenOrdersResponse = await fetch(`${appOrigin}/api/admin/orders`, {
+    headers: { Cookie: 'lorobuy_access=customer-token' },
+  });
+  assert.equal(forbiddenOrdersResponse.status, 403);
+
+  const ordersResponse = await fetch(`${appOrigin}/api/admin/orders`, {
+    headers: { Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(ordersResponse.status, 200);
+  assert.equal(ordersResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+  const ordersPayload = await ordersResponse.json();
+  assert.equal(ordersPayload.orders.length, 1);
+  assert.equal(ordersPayload.orders[0].customer.email, 'cliente@example.com');
+  assert.equal(ordersPayload.orders[0].items[0].productName, 'Mock Product');
+  assert.equal(ordersPayload.orders[0].payment.status, 'paid');
+  assert.equal(ordersPayload.orders[0].events[0].type, 'order_created');
+  assert.equal(ordersPayload.summary.completed, 1);
+  assert.equal(ordersPayload.summary.registeredTotalCents, 2499);
+  assert.equal(ordersPayload.summary.testMode, 1);
 
   const updateUserResponse = await fetch(`${appOrigin}/api/admin/users/${customerUser.id}`, {
     method: 'PATCH',

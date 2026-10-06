@@ -1,8 +1,9 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const state = {
-  products: [], categories: [], users: [], usersLoaded: false,
-  media: [], mediaCover: null, editingId: null, deactivateId: null, editingUserId: null, mediaProductId: null,
+  products: [], categories: [], users: [], usersLoaded: false, orders: [], ordersLoaded: false, orderSummary: null,
+  media: [], mediaCover: null, editingId: null, deactivateId: null, editingUserId: null,
+  mediaProductId: null, activeOrderId: null,
 };
 const productDialog = $('.product-dialog');
 const confirmDialog = $('.confirm-dialog');
@@ -10,12 +11,19 @@ const form = $('.product-form');
 let userDialog;
 let userForm;
 let mediaDialog;
+let orderDialog;
 
 const money = (cents, currency = 'USD') => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency,
 }).format(Number(cents || 0) / 100);
 const inputMoney = (cents) => cents == null ? '' : (cents / 100).toFixed(2);
+const formatDateTime = (value) => value ? new Intl.DateTimeFormat('es-CO', {
+  dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Bogota',
+}).format(new Date(value)) : '—';
+const orderStatusLabels = {
+  draft: 'Borrador', pending: 'Pendiente', completed: 'Pagado', cancelled: 'Cancelado', refunded: 'Reembolsado',
+};
 
 function createElement(tag, { className, text, type } = {}) {
   const element = document.createElement(tag);
@@ -177,6 +185,100 @@ function initializeUsersInterface() {
   userForm.addEventListener('submit', saveUser);
 }
 
+function initializeOrdersInterface() {
+  const ordersLink = createElement('a');
+  ordersLink.href = '#pedidos';
+  ordersLink.dataset.view = 'orders';
+  ordersLink.append(createElement('span', { text: '▤' }), document.createTextNode('Pedidos'));
+  const storeLink = [...$$('.side-nav a')].find((link) => !link.dataset.view);
+  $('.side-nav').insertBefore(ordersLink, storeLink ?? null);
+
+  const ordersModule = [...$$('.module')].find((module) => $('h3', module)?.textContent.trim() === 'Pedidos y compras');
+  if (ordersModule) {
+    ordersModule.classList.add('enabled');
+    ordersModule.tabIndex = 0;
+    ordersModule.setAttribute('role', 'button');
+    const badge = $('.soon', ordersModule);
+    if (badge) { badge.className = 'ready'; badge.textContent = 'Activo'; }
+    ordersModule.addEventListener('click', () => show('orders'));
+    ordersModule.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show('orders'); }
+    });
+  }
+
+  const view = createElement('section', { className: 'view orders-view' });
+  view.dataset.panel = 'orders';
+  view.hidden = true;
+  const head = createElement('div', { className: 'workspace-head' });
+  const heading = createElement('div');
+  heading.append(
+    createElement('h2', { text: 'Pedidos y compras' }),
+    createElement('p', { text: 'Historial de checkout, pagos confirmados por webhook y compradores.' }),
+  );
+  const refresh = createElement('button', { className: 'secondary refresh-orders', text: 'Actualizar', type: 'button' });
+  head.append(heading, refresh);
+
+  const stats = createElement('section', { className: 'order-stats' });
+  for (const [key, label] of [
+    ['completed', 'Ventas confirmadas'], ['total', 'Total registrado'],
+    ['pending', 'Pendientes'], ['testMode', 'Pedidos de prueba'],
+  ]) {
+    const card = createElement('article', { className: 'order-stat' });
+    const value = createElement('strong', { text: '—' }); value.dataset.orderStat = key;
+    card.append(createElement('span', { text: label }), value);
+    stats.append(card);
+  }
+
+  const toolbar = createElement('div', { className: 'toolbar order-toolbar' });
+  const searchLabel = createElement('label', { className: 'search' });
+  const search = createElement('input');
+  search.className = 'order-search'; search.type = 'search';
+  search.placeholder = 'Buscar pedido, correo o producto…';
+  searchLabel.append(search);
+  const status = createElement('select', { className: 'order-status-filter' });
+  for (const [value, text] of [['', 'Todos los estados'], ...Object.entries(orderStatusLabels)]) {
+    const option = createElement('option', { text }); option.value = value; status.append(option);
+  }
+  toolbar.append(searchLabel, status);
+
+  const card = createElement('div', { className: 'table-card' });
+  const scroll = createElement('div', { className: 'table-scroll' });
+  const table = createElement('table', { className: 'data-table orders-table' });
+  const header = createElement('thead');
+  const headerRow = createElement('tr');
+  for (const label of ['Pedido', 'Cliente', 'Productos', 'Total', 'Estado', 'Fecha', 'Acciones']) {
+    headerRow.append(createElement('th', { text: label }));
+  }
+  header.append(headerRow);
+  const body = createElement('tbody', { className: 'orders-body' });
+  body.append(emptyRow(7, 'Abre la sección para cargar los pedidos.'));
+  table.append(header, body); scroll.append(table); card.append(scroll);
+  const limitNote = createElement('p', { className: 'orders-limit-note', text: 'Se muestran hasta los 500 pedidos más recientes.' });
+  view.append(head, stats, toolbar, card, limitNote); $('main').append(view);
+
+  orderDialog = createElement('dialog', { className: 'order-dialog' });
+  const shell = createElement('div');
+  const modalHead = createElement('div', { className: 'modal-head' });
+  modalHead.append(
+    createElement('div', { className: 'order-detail-heading' }),
+    createElement('button', { className: 'close close-order', text: '×', type: 'button' }),
+  );
+  const modalBody = createElement('div', { className: 'modal-body order-detail' });
+  const modalFoot = createElement('div', { className: 'modal-foot' });
+  modalFoot.append(createElement('button', { className: 'secondary close-order', text: 'Cerrar', type: 'button' }));
+  shell.append(modalHead, modalBody, modalFoot); orderDialog.append(shell); document.body.append(orderDialog);
+
+  search.addEventListener('input', renderOrders);
+  status.addEventListener('change', renderOrders);
+  refresh.addEventListener('click', () => loadOrders(true));
+  body.addEventListener('click', (event) => {
+    const detail = event.target.closest('[data-order-detail]');
+    if (detail) openOrder(state.orders.find((order) => order.id === detail.dataset.orderDetail));
+  });
+  $$('.close-order', orderDialog).forEach((button) => button.addEventListener('click', () => orderDialog.close()));
+  orderDialog.addEventListener('close', () => { state.activeOrderId = null; });
+}
+
 function initializeMediaInterface() {
   mediaDialog = createElement('dialog', { className: 'media-dialog' });
   const shell = createElement('div');
@@ -233,9 +335,12 @@ function initializeMediaInterface() {
 function show(view) {
   $$('.view').forEach((panel) => { panel.hidden = panel.dataset.panel !== view; });
   $$('[data-view]').forEach((link) => link.classList.toggle('active', link.dataset.view === view));
-  $('.page-title').textContent = view === 'products' ? 'Productos' : view === 'prices' ? 'Precios' : view === 'users' ? 'Usuarios' : 'Administración';
+  $('.page-title').textContent = {
+    products: 'Productos', prices: 'Precios', users: 'Usuarios', orders: 'Pedidos y compras',
+  }[view] ?? 'Administración';
   history.replaceState(null, '', `#${view === 'dashboard' ? 'resumen' : view}`);
   if (view === 'users' && !state.usersLoaded) loadUsers().catch((error) => toast(error.message, 'error'));
+  if (view === 'orders' && !state.ordersLoaded) loadOrders().catch((error) => toast(error.message, 'error'));
 }
 
 function matches(product, query) {
@@ -494,6 +599,163 @@ async function removeMedia(mediaId) {
   } catch (error) { toast(error.message, 'error'); }
 }
 
+function orderStatusBadge(order) {
+  return createElement('span', {
+    className: `status order-${order.status}`,
+    text: orderStatusLabels[order.status] ?? order.status,
+  });
+}
+
+function renderOrderStats() {
+  const summary = state.orderSummary;
+  if (!summary) return;
+  const values = {
+    completed: String(summary.completed ?? 0),
+    total: money(summary.registeredTotalCents, summary.currency),
+    pending: String(summary.pending ?? 0),
+    testMode: String(summary.testMode ?? 0),
+  };
+  for (const [key, value] of Object.entries(values)) {
+    const element = $(`[data-order-stat="${key}"]`);
+    if (element) element.textContent = value;
+  }
+}
+
+function renderOrders() {
+  const body = $('.orders-body');
+  if (!body) return;
+  const query = $('.order-search').value.trim().toLowerCase();
+  const selectedStatus = $('.order-status-filter').value;
+  const orders = state.orders.filter((order) => {
+    const searchable = [
+      order.id, order.customer?.displayName, order.customer?.email,
+      order.payment?.externalOrderId, ...order.items.map((item) => item.productName),
+    ].join(' ').toLowerCase();
+    return (!selectedStatus || order.status === selectedStatus) && searchable.includes(query);
+  });
+  body.replaceChildren();
+  if (!orders.length) return body.append(emptyRow(7, state.ordersLoaded
+    ? 'No hay pedidos que coincidan.' : 'Cargando pedidos…'));
+
+  for (const order of orders) {
+    const row = createElement('tr');
+    const orderIdentity = createElement('div', { className: 'order-identity' });
+    orderIdentity.append(
+      createElement('strong', { text: `#${order.id.slice(0, 8).toUpperCase()}` }),
+      createElement('small', { text: order.payment
+        ? `${order.payment.provider === 'lemon_squeezy' ? 'Lemon Squeezy' : order.payment.provider} · ${order.payment.testMode ? 'Prueba' : 'Producción'}`
+        : 'Sin intento de pago' }),
+    );
+    appendCell(row, orderIdentity);
+
+    const customer = createElement('div', { className: 'order-customer' });
+    customer.append(
+      createElement('strong', { text: order.customer?.displayName || (order.customer?.isAnonymous ? 'Compra invitada' : 'Cliente') }),
+      createElement('small', { text: order.customer?.email || 'Correo pendiente' }),
+    );
+    appendCell(row, customer);
+
+    const product = createElement('div', { className: 'order-products' });
+    const names = order.items.map((item) => item.productName);
+    product.append(
+      createElement('strong', { text: names[0] || 'Sin productos' }),
+      createElement('small', { text: names.length > 1 ? `+ ${names.length - 1} producto(s)` : `${order.items.length} artículo(s)` }),
+    );
+    appendCell(row, product);
+    appendCell(row, money(order.totalCents, order.currency), 'order-total');
+    appendCell(row, orderStatusBadge(order));
+    appendCell(row, formatDateTime(order.createdAt), 'order-date');
+    const detail = createElement('button', { className: 'small-button', text: 'Ver detalle', type: 'button' });
+    detail.dataset.orderDetail = order.id;
+    appendCell(row, detail);
+    body.append(row);
+  }
+}
+
+function orderDetailLine(label, value) {
+  const line = createElement('div', { className: 'order-detail-line' });
+  line.append(createElement('span', { text: label }), createElement('strong', { text: value || '—' }));
+  return line;
+}
+
+function openOrder(order) {
+  if (!order) return;
+  state.activeOrderId = order.id;
+  const heading = $('.order-detail-heading');
+  heading.replaceChildren(
+    createElement('h2', { text: `Pedido #${order.id.slice(0, 8).toUpperCase()}` }),
+    createElement('p', { text: `Creado ${formatDateTime(order.createdAt)}` }),
+  );
+  const detail = $('.order-detail');
+  detail.replaceChildren();
+
+  const overview = createElement('section', { className: 'order-detail-grid' });
+  const statusCard = createElement('article', { className: 'order-detail-card' });
+  statusCard.append(createElement('span', { text: 'Estado del pedido' }), orderStatusBadge(order));
+  const totalCard = createElement('article', { className: 'order-detail-card' });
+  totalCard.append(createElement('span', { text: 'Total registrado' }), createElement('strong', { text: money(order.totalCents, order.currency) }));
+  const customerCard = createElement('article', { className: 'order-detail-card' });
+  customerCard.append(
+    createElement('span', { text: 'Comprador' }),
+    createElement('strong', { text: order.customer?.displayName || (order.customer?.isAnonymous ? 'Compra invitada' : 'Cliente') }),
+    createElement('small', { text: order.customer?.email || 'Correo pendiente' }),
+  );
+  const modeCard = createElement('article', { className: 'order-detail-card' });
+  modeCard.append(
+    createElement('span', { text: 'Entorno de pago' }),
+    createElement('strong', { text: order.payment ? (order.payment.testMode ? 'Modo prueba' : 'Producción') : 'No iniciado' }),
+  );
+  overview.append(statusCard, totalCard, customerCard, modeCard); detail.append(overview);
+
+  const itemsSection = createElement('section', { className: 'order-detail-section' });
+  itemsSection.append(createElement('h3', { text: 'Productos comprados' }));
+  const items = createElement('div', { className: 'order-item-list' });
+  for (const item of order.items) {
+    const entry = createElement('article', { className: 'order-item' });
+    const image = createElement('img'); image.src = `/${item.product?.imagePath || 'assets/favicon.png'}`; image.alt = '';
+    const copy = createElement('div');
+    copy.append(
+      createElement('strong', { text: item.productName }),
+      createElement('small', { text: `${item.quantity} × ${money(item.unitPriceCents, item.currency)}` }),
+    );
+    entry.append(image, copy, createElement('strong', { text: money(item.subtotalCents, item.currency) }));
+    items.append(entry);
+  }
+  if (!order.items.length) items.append(createElement('p', { className: 'order-empty-detail', text: 'No hay artículos asociados.' }));
+  itemsSection.append(items); detail.append(itemsSection);
+
+  const paymentSection = createElement('section', { className: 'order-detail-section' });
+  paymentSection.append(createElement('h3', { text: 'Pago y validación' }));
+  const paymentData = createElement('div', { className: 'order-detail-lines' });
+  paymentData.append(
+    orderDetailLine('Proveedor', order.payment?.provider === 'lemon_squeezy' ? 'Lemon Squeezy' : order.payment?.provider),
+    orderDetailLine('Estado del intento', order.payment?.status || 'Sin intento'),
+    orderDetailLine('ID externo', order.payment?.externalOrderId || order.payment?.externalCheckoutId),
+    orderDetailLine('Pago confirmado', formatDateTime(order.payment?.paidAt)),
+    orderDetailLine('Webhook validado', order.events.length ? `Sí · ${order.events.length} evento(s)` : 'Todavía no'),
+    orderDetailLine('Último evento', order.events[0]?.type || '—'),
+  );
+  paymentSection.append(paymentData); detail.append(paymentSection);
+  orderDialog.showModal();
+}
+
+async function loadOrders(force = false) {
+  if (state.ordersLoaded && !force) return;
+  const body = $('.orders-body');
+  if (body) { body.replaceChildren(); body.append(emptyRow(7, 'Cargando pedidos…')); }
+  try {
+    const data = await api('/api/admin/orders');
+    state.orders = data.orders;
+    state.orderSummary = data.summary;
+    state.ordersLoaded = true;
+    renderOrderStats();
+    renderOrders();
+  } catch (error) {
+    if (body) { body.replaceChildren(); body.append(emptyRow(7, error.message)); }
+    throw error;
+  }
+}
+
 function renderUsers() {
   const body = $('.users-body');
   if (!body) return;
@@ -610,7 +872,8 @@ async function load() {
     await loadCatalog();
     show(location.hash === '#productos' ? 'products'
       : location.hash === '#precios' ? 'prices'
-        : location.hash === '#usuarios' ? 'users' : 'dashboard');
+        : location.hash === '#usuarios' ? 'users'
+          : location.hash === '#pedidos' ? 'orders' : 'dashboard');
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -728,6 +991,7 @@ $('.prices-body').addEventListener('click', async (event) => {
 });
 
 initializeMediaInterface();
+initializeOrdersInterface();
 initializeUsersInterface();
 $('.product-search').addEventListener('input', renderProducts);
 $('.price-search').addEventListener('input', renderPrices);

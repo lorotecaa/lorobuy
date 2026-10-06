@@ -854,6 +854,100 @@ app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
   });
 }));
 
+function adminOrder(row, authUser) {
+  const attempts = [...(Array.isArray(row.payment_attempts) ? row.payment_attempts : [])]
+    .sort((left, right) => String(right.created_at ?? '').localeCompare(String(left.created_at ?? '')));
+  const events = [...(Array.isArray(row.payment_events) ? row.payment_events : [])]
+    .sort((left, right) => String(right.received_at ?? '').localeCompare(String(left.received_at ?? '')));
+  const latestAttempt = attempts[0] ?? null;
+  const email = row.customer_email ?? authUser?.email?.toLowerCase() ?? null;
+  const displayName = authUser?.user_metadata?.full_name ?? authUser?.user_metadata?.name ?? null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    status: row.status,
+    currency: row.currency,
+    totalCents: row.total_cents,
+    customer: {
+      email,
+      displayName,
+      isAnonymous: Boolean(authUser?.is_anonymous),
+    },
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    completedAt: row.completed_at,
+    items: (Array.isArray(row.order_items) ? row.order_items : []).map((item) => ({
+      id: item.id,
+      productId: item.product_id,
+      productName: item.product_name,
+      quantity: item.quantity,
+      unitPriceCents: item.unit_price_cents,
+      subtotalCents: item.subtotal_cents,
+      currency: item.currency,
+      product: item.products ? {
+        slug: item.products.slug,
+        imagePath: IMAGE_PATTERN.test(item.products.image_path)
+          ? item.products.image_path : 'assets/favicon.png',
+      } : null,
+    })),
+    payment: latestAttempt ? {
+      provider: latestAttempt.provider,
+      status: latestAttempt.status,
+      externalCheckoutId: latestAttempt.external_checkout_id,
+      externalOrderId: latestAttempt.external_order_id,
+      expectedAmountCents: latestAttempt.expected_amount_cents,
+      currency: latestAttempt.currency,
+      testMode: latestAttempt.test_mode,
+      createdAt: latestAttempt.created_at,
+      paidAt: latestAttempt.paid_at,
+    } : null,
+    events: events.map((event) => ({
+      id: event.id,
+      provider: event.provider,
+      type: event.event_type,
+      providerObjectId: event.provider_object_id,
+      receivedAt: event.received_at,
+      processedAt: event.processed_at,
+    })),
+  };
+}
+
+app.get('/api/admin/orders', asyncRoute(async (request, response) => {
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  if (!adminSupabase) return response.status(503).json({ error: 'La gestión de pedidos no está configurada.' });
+
+  const [ordersResult, authUsers] = await Promise.all([
+    session.client
+      .from('orders')
+      .select(`
+        id,user_id,status,currency,total_cents,customer_email,created_at,updated_at,completed_at,
+        order_items(id,product_id,product_name,quantity,unit_price_cents,subtotal_cents,currency,products(slug,image_path)),
+        payment_attempts(id,provider,status,external_checkout_id,external_order_id,expected_amount_cents,currency,test_mode,created_at,updated_at,paid_at),
+        payment_events(id,provider,event_type,provider_object_id,received_at,processed_at)
+      `)
+      .order('created_at', { ascending: false })
+      .limit(500),
+    readSupabaseAuthUsers(),
+  ]);
+  if (ordersResult.error) throw new Error('Unable to load orders from Supabase.');
+
+  const users = new Map(authUsers.map((user) => [user.id, user]));
+  const orders = (ordersResult.data ?? []).map((order) => adminOrder(order, users.get(order.user_id)));
+  const completedOrders = orders.filter((order) => order.status === 'completed');
+  const summary = {
+    orders: orders.length,
+    completed: completedOrders.length,
+    pending: orders.filter((order) => order.status === 'pending').length,
+    refunded: orders.filter((order) => order.status === 'refunded').length,
+    testMode: orders.filter((order) => order.payment?.testMode).length,
+    registeredTotalCents: completedOrders.reduce((total, order) => total + Number(order.totalCents || 0), 0),
+    currency: completedOrders[0]?.currency ?? 'USD',
+  };
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({ orders, summary, limit: 500 });
+}));
+
 function validatedProductPayload(body, { partial = false } = {}) {
   const payload = {};
   const required = !partial;

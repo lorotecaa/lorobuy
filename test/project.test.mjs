@@ -341,6 +341,20 @@ test('admin users combine Supabase Auth with protected profile role management',
   assert.match(adminScript, /data-edit-user/);
 });
 
+test('admin orders expose a protected read-only payment history', () => {
+  assert.match(server, /app\.get\('\/api\/admin\/orders'/);
+  assert.match(server, /\.from\('orders'\)/);
+  assert.match(server, /payment_attempts\(id,provider,status/);
+  assert.match(server, /payment_events\(id,provider,event_type/);
+  assert.match(server, /registeredTotalCents/);
+  assert.doesNotMatch(server, /app\.(?:patch|post|delete)\('\/api\/admin\/orders/);
+  assert.match(adminScript, /initializeOrdersInterface/);
+  assert.match(adminScript, /data-order-detail/);
+  assert.match(adminScript, /Webhook validado/);
+  assert.match(adminScript, /Modo prueba/);
+  assert.doesNotMatch(adminScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
+});
+
 test('all referenced local assets exist', () => {
   const references = [...`${html}\n${productHtml}\n${adminHtml}`.matchAll(/(?:src|href)="\/?(assets\/[^"]+)"/g)].map((match) => match[1]);
   for (const reference of references) {

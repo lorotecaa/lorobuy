@@ -59,6 +59,8 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     name: 'Animaciones Quiéreme',
     sort_order: 20,
     is_active: true,
+    created_at: '2026-10-02T12:00:00.000Z',
+    updated_at: '2026-10-04T12:00:00.000Z',
   };
   const productMedia = {
     id: '77777777-7777-4777-8777-777777777777',
@@ -167,6 +169,8 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let webhookRpcPayload;
   let adminCreatePayload;
   let adminUpdatePayload;
+  let adminCategoryInsertPayload;
+  const adminCategoryUpdatePayloads = [];
   let adminUserUpdatePayload;
   let adminCancelOrderPayload;
   let adminDeleteOrderPayload;
@@ -313,6 +317,15 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     }
     if (request.url?.startsWith('/rest/v1/categories')) {
       response.setHeader('Content-Type', 'application/json');
+      if (request.method === 'POST') {
+        adminCategoryInsertPayload = await readJsonBody(request);
+        return response.end(JSON.stringify([{ ...category, ...adminCategoryInsertPayload }]));
+      }
+      if (request.method === 'PATCH') {
+        const payload = await readJsonBody(request);
+        adminCategoryUpdatePayloads.push(payload);
+        return response.end(JSON.stringify([{ ...category, ...payload }]));
+      }
       return response.end(JSON.stringify([category]));
     }
     if (request.url?.startsWith('/rest/v1/product_media')) {
@@ -511,6 +524,42 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(adminCatalog.products[0].priceCents, 2499);
   assert.equal(adminCatalog.products[0].category.name, 'Animaciones Quiéreme');
   assert.equal(adminCatalog.categories[0].id, category.id);
+  assert.equal(adminCatalog.categories[0].productCount, 1);
+  assert.equal(adminCatalog.categories[0].activeProductCount, 1);
+
+  const forbiddenCategoryResponse = await fetch(`${appOrigin}/api/admin/categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=customer-token' },
+    body: JSON.stringify({ name: 'Sin permiso', slug: 'sin-permiso', sortOrder: 50, isActive: true }),
+  });
+  assert.equal(forbiddenCategoryResponse.status, 403);
+
+  const createCategoryResponse = await fetch(`${appOrigin}/api/admin/categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+    body: JSON.stringify({ name: 'Packs especiales', slug: 'packs-especiales', sortOrder: 50, isActive: true }),
+  });
+  assert.equal(createCategoryResponse.status, 201);
+  assert.equal(adminCategoryInsertPayload.name, 'Packs especiales');
+  assert.equal(adminCategoryInsertPayload.slug, 'packs-especiales');
+  assert.equal(adminCategoryInsertPayload.sort_order, 50);
+  assert.equal(adminCategoryInsertPayload.is_active, true);
+
+  const updateCategoryResponse = await fetch(`${appOrigin}/api/admin/categories/${category.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+    body: JSON.stringify({ name: 'Animaciones especiales', sortOrder: 25 }),
+  });
+  assert.equal(updateCategoryResponse.status, 200);
+  assert.deepEqual(adminCategoryUpdatePayloads.at(-1), { name: 'Animaciones especiales', sort_order: 25 });
+
+  const deactivateCategoryResponse = await fetch(`${appOrigin}/api/admin/categories/${category.id}`, {
+    method: 'DELETE',
+    headers: { Origin: appOrigin, Cookie: 'lorobuy_access=admin-token' },
+  });
+  assert.equal(deactivateCategoryResponse.status, 200);
+  assert.equal((await deactivateCategoryResponse.json()).deactivated, true);
+  assert.deepEqual(adminCategoryUpdatePayloads.at(-1), { is_active: false });
 
   const invalidPriceResponse = await fetch(`${appOrigin}/api/admin/products/${product.id}`, {
     method: 'PATCH',

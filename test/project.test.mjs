@@ -328,6 +328,21 @@ test('admin products and prices use the existing catalog with an atomic Lemon ma
   assert.doesNotMatch(`${adminHtml}\n${adminScript}`, /SUPABASE_SECRET_KEY|service_role|sb_secret_/);
 });
 
+test('admin categories manage the existing taxonomy without destructive deletion', () => {
+  assert.match(server, /app\.post\('\/api\/admin\/categories'/);
+  assert.match(server, /app\.patch\('\/api\/admin\/categories\/:categoryId'/);
+  assert.match(server, /app\.delete\('\/api\/admin\/categories\/:categoryId'/);
+  assert.match(server, /\.from\('categories'\)\s*\n\s*\.update\(\{ is_active: false \}\)/);
+  assert.doesNotMatch(server, /\.from\('categories'\)\s*\n\s*\.delete\(\)/);
+  assert.match(adminScript, /initializeCategoriesInterface/);
+  assert.match(adminScript, /dataset\.categoryProducts/);
+  assert.match(adminScript, /dataset\.categoryEdit/);
+  assert.match(adminScript, /dataset\.categoryDeactivate/);
+  assert.match(adminScript, /dataset\.categoryActivate/);
+  assert.match(adminScript, /renderCategories/);
+  assert.doesNotMatch(adminScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
+});
+
 test('admin users combine Supabase Auth with protected profile role management', () => {
   assert.match(server, /app\.get\('\/api\/admin\/users'/);
   assert.match(server, /app\.patch\('\/api\/admin\/users\/:userId'/);

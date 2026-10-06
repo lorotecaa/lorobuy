@@ -784,24 +784,79 @@ app.post('/api/downloads/:fileId', asyncRoute(async (request, response) => {
   return response.json({ url: signed.signedUrl, expiresIn: 60 });
 }));
 
+function validatedCategoryPayload(body, { partial = false } = {}) {
+  const payload = {};
+  const has = (field) => Object.prototype.hasOwnProperty.call(body ?? {}, field);
+  if (!partial || has('name')) {
+    const name = normalizeText(body?.name, 100, { required: true });
+    if (!name) return null;
+    payload.name = name;
+  }
+  if (!partial || has('slug')) {
+    const categorySlug = normalizeText(body?.slug, 80, { required: true });
+    if (!categorySlug || !SLUG_PATTERN.test(categorySlug)) return null;
+    payload.slug = categorySlug;
+  }
+  if (!partial || has('sortOrder')) {
+    const sortOrder = integerInRange(body?.sortOrder ?? 0, 0, 100_000);
+    if (sortOrder === null) return null;
+    payload.sort_order = sortOrder;
+  }
+  if (has('isActive')) {
+    if (typeof body.isActive !== 'boolean') return null;
+    payload.is_active = body.isActive;
+  } else if (!partial) {
+    payload.is_active = true;
+  }
+  if (partial && Object.keys(payload).length === 0) return null;
+  return payload;
+}
+
 app.post('/api/admin/categories', asyncRoute(async (request, response) => {
   const session = await requireAdmin(request, response, config);
   if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
-
-  const name = normalizeText(request.body?.name, 100, { required: true });
-  const slug = normalizeText(request.body?.slug, 80, { required: true });
-  const sortOrder = integerInRange(request.body?.sortOrder ?? 0, 0, 100_000);
-  if (!name || !slug || !SLUG_PATTERN.test(slug) || sortOrder === null) {
-    return response.status(400).json({ error: 'Datos de categoría no válidos.' });
-  }
+  const payload = validatedCategoryPayload(request.body);
+  if (!payload) return response.status(400).json({ error: 'Datos de categoría no válidos.' });
 
   const { data, error } = await session.client
     .from('categories')
-    .insert({ name, slug, sort_order: sortOrder })
-    .select('id,slug,name,sort_order,is_active')
+    .insert(payload)
+    .select('id,slug,name,sort_order,is_active,created_at,updated_at')
     .single();
-  if (error) return response.status(400).json({ error: 'No fue posible crear la categoría.' });
+  if (error) return response.status(400).json({ error: 'No fue posible crear la categoría. Revisa que el slug no esté repetido.' });
   return response.status(201).json({ category: data });
+}));
+
+app.patch('/api/admin/categories/:categoryId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.categoryId)) return response.status(400).json({ error: 'Categoría no válida.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  const payload = validatedCategoryPayload(request.body, { partial: true });
+  if (!payload) return response.status(400).json({ error: 'No hay cambios de categoría válidos.' });
+
+  const { data, error } = await session.client
+    .from('categories')
+    .update(payload)
+    .eq('id', request.params.categoryId)
+    .select('id,slug,name,sort_order,is_active,created_at,updated_at')
+    .maybeSingle();
+  if (error || !data) return response.status(404).json({ error: 'Categoría no encontrada o slug duplicado.' });
+  return response.json({ category: data });
+}));
+
+app.delete('/api/admin/categories/:categoryId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.categoryId)) return response.status(400).json({ error: 'Categoría no válida.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+
+  const { data, error } = await session.client
+    .from('categories')
+    .update({ is_active: false })
+    .eq('id', request.params.categoryId)
+    .select('id,slug,name,sort_order,is_active,created_at,updated_at')
+    .maybeSingle();
+  if (error || !data) return response.status(404).json({ error: 'Categoría no encontrada.' });
+  return response.json({ category: data, deactivated: true });
 }));
 
 function adminProduct(row) {
@@ -834,7 +889,7 @@ app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
       .order('name', { ascending: true }),
     session.client
       .from('categories')
-      .select('id,slug,name,sort_order,is_active')
+      .select('id,slug,name,sort_order,is_active,created_at,updated_at')
       .order('sort_order', { ascending: true }),
   ]);
 
@@ -842,14 +897,19 @@ app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
     throw new Error('Unable to load the administrative catalog from Supabase.');
   }
   response.set('Cache-Control', 'private, no-store, max-age=0');
+  const products = (productsResult.data ?? []).map(adminProduct);
   return response.json({
-    products: (productsResult.data ?? []).map(adminProduct),
+    products,
     categories: (categoriesResult.data ?? []).map((category) => ({
       id: category.id,
       slug: category.slug,
       name: category.name,
       sortOrder: category.sort_order,
       isActive: category.is_active,
+      createdAt: category.created_at,
+      updatedAt: category.updated_at,
+      productCount: products.filter((product) => product.categoryId === category.id).length,
+      activeProductCount: products.filter((product) => product.categoryId === category.id && product.isActive).length,
     })),
   });
 }));

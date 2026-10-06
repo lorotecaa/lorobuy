@@ -142,6 +142,17 @@
 .order-detail-line strong { margin-top: 6px; overflow-wrap: anywhere; }
 .order-empty-detail { margin: 0; color: var(--muted); }
 
+.categories-table { min-width: 1080px; }
+.category-identity { min-width: 190px; }
+.category-identity strong, .category-identity small,
+.category-count strong, .category-count small { display: block; }
+.category-identity small, .category-count small { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.category-count strong { color: #fff; font-size: 15px; }
+.category-order { color: #d8d4e1; font-weight: 800; }
+.category-date { min-width: 150px; color: #cbc7d4; }
+.category-actions { min-width: 270px; flex-wrap: wrap; }
+.category-deactivate-dialog .modal-body p { margin: 0; color: #cbc7d4; line-height: 1.65; }
+
 @media (max-width: 850px) {
   .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .order-stats, .order-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

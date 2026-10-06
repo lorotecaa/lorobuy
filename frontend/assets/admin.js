@@ -4,6 +4,7 @@ const state = {
   products: [], categories: [], users: [], usersLoaded: false, orders: [], ordersLoaded: false, orderSummary: null,
   media: [], mediaCover: null, editingId: null, deactivateId: null, editingUserId: null,
   mediaProductId: null, activeOrderId: null, orderAction: null,
+  editingCategoryId: null, deactivateCategoryId: null,
 };
 const productDialog = $('.product-dialog');
 const confirmDialog = $('.confirm-dialog');
@@ -13,6 +14,10 @@ let userForm;
 let mediaDialog;
 let orderDialog;
 let orderActionDialog;
+let categoryDialog;
+let categoryForm;
+let categoryDeactivateDialog;
+let categorySlugEdited = false;
 
 const money = (cents, currency = 'USD') => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -82,6 +87,131 @@ function toast(message, type = 'success') {
   element.className = `toast ${type === 'error' ? 'error ' : ''}show`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { element.className = 'toast'; }, 3600);
+}
+
+function initializeCategoriesInterface() {
+  const categoriesLink = createElement('a');
+  categoriesLink.href = '#categorias';
+  categoriesLink.dataset.view = 'categories';
+  categoriesLink.append(createElement('span', { text: '⌘' }), document.createTextNode('Categorías'));
+  const storeLink = [...$$('.side-nav a')].find((link) => !link.dataset.view);
+  $('.side-nav').insertBefore(categoriesLink, storeLink ?? null);
+
+  const categoriesModule = [...$$('.module')].find((module) => $('h3', module)?.textContent.trim() === 'Categorías');
+  if (categoriesModule) {
+    categoriesModule.classList.add('enabled');
+    categoriesModule.tabIndex = 0;
+    categoriesModule.setAttribute('role', 'button');
+    const badge = $('.soon', categoriesModule);
+    if (badge) { badge.className = 'ready'; badge.textContent = 'Activo'; }
+    categoriesModule.addEventListener('click', () => show('categories'));
+    categoriesModule.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show('categories'); }
+    });
+  }
+
+  const view = createElement('section', { className: 'view categories-view' });
+  view.dataset.panel = 'categories'; view.hidden = true;
+  const head = createElement('div', { className: 'workspace-head' });
+  const heading = createElement('div');
+  heading.append(
+    createElement('h2', { text: 'Categorías' }),
+    createElement('p', { text: 'Organiza las colecciones, su orden y visibilidad en la tienda.' }),
+  );
+  const createButton = createElement('button', { className: 'primary new-category', text: '+ Nueva categoría', type: 'button' });
+  head.append(heading, createButton);
+  const toolbar = createElement('div', { className: 'toolbar' });
+  const searchLabel = createElement('label', { className: 'search' });
+  const search = createElement('input');
+  search.className = 'category-search'; search.type = 'search';
+  search.placeholder = 'Buscar por nombre o slug…'; searchLabel.append(search); toolbar.append(searchLabel);
+  const card = createElement('div', { className: 'table-card' });
+  const scroll = createElement('div', { className: 'table-scroll' });
+  const table = createElement('table', { className: 'data-table categories-table' });
+  const header = createElement('thead'); const headerRow = createElement('tr');
+  for (const label of ['Categoría', 'Productos', 'Publicados', 'Orden', 'Estado', 'Actualizada', 'Acciones']) {
+    headerRow.append(createElement('th', { text: label }));
+  }
+  header.append(headerRow);
+  const body = createElement('tbody', { className: 'categories-body' });
+  body.append(emptyRow(7, 'Cargando categorías…'));
+  table.append(header, body); scroll.append(table); card.append(scroll); view.append(head, toolbar, card);
+  $('main').append(view);
+
+  categoryDialog = createElement('dialog', { className: 'category-dialog' });
+  categoryForm = createElement('form', { className: 'category-form' });
+  const modalHead = createElement('div', { className: 'modal-head' });
+  modalHead.append(
+    createElement('h2', { className: 'category-form-title', text: 'Nueva categoría' }),
+    createElement('button', { className: 'close close-category', text: '×', type: 'button' }),
+  );
+  const modalBody = createElement('div', { className: 'modal-body' });
+  const grid = createElement('div', { className: 'form-grid' });
+  const nameField = createElement('div', { className: 'field full' });
+  nameField.append(createElement('label', { text: 'Nombre' }));
+  const nameInput = createElement('input');
+  nameInput.name = 'name'; nameInput.maxLength = 100; nameInput.required = true; nameField.append(nameInput);
+  const slugField = createElement('div', { className: 'field full' });
+  slugField.append(createElement('label', { text: 'Slug de la URL' }));
+  const slugInput = createElement('input');
+  slugInput.name = 'slug'; slugInput.maxLength = 80; slugInput.required = true;
+  slugInput.pattern = '[a-z0-9]+(?:-[a-z0-9]+)*';
+  slugField.append(slugInput, createElement('small', { text: 'Solo minúsculas, números y guiones.' }));
+  const orderField = createElement('div', { className: 'field' });
+  orderField.append(createElement('label', { text: 'Orden de aparición' }));
+  const orderInput = createElement('input');
+  orderInput.name = 'sortOrder'; orderInput.type = 'number'; orderInput.min = '0';
+  orderInput.max = '100000'; orderInput.required = true; orderField.append(orderInput);
+  const visibilityField = createElement('div', { className: 'field' });
+  visibilityField.append(createElement('label', { text: 'Visibilidad' }));
+  const switchLabel = createElement('label', { className: 'switch-line' });
+  const activeInput = createElement('input'); activeInput.name = 'isActive'; activeInput.type = 'checkbox';
+  switchLabel.append(activeInput, document.createTextNode(' Visible en la tienda'));
+  visibilityField.append(switchLabel);
+  grid.append(nameField, slugField, orderField, visibilityField);
+  modalBody.append(grid, createElement('p', { className: 'form-error category-error' }));
+  const modalFoot = createElement('div', { className: 'modal-foot' });
+  modalFoot.append(
+    createElement('button', { className: 'secondary cancel-category', text: 'Cancelar', type: 'button' }),
+    createElement('button', { className: 'primary save-category', text: 'Crear categoría', type: 'submit' }),
+  );
+  categoryForm.append(modalHead, modalBody, modalFoot); categoryDialog.append(categoryForm); document.body.append(categoryDialog);
+
+  categoryDeactivateDialog = createElement('dialog', { className: 'confirm-dialog category-deactivate-dialog' });
+  const deactivateShell = createElement('div');
+  const deactivateHead = createElement('div', { className: 'modal-head' });
+  deactivateHead.append(
+    createElement('h2', { text: 'Desactivar categoría' }),
+    createElement('button', { className: 'close cancel-category-deactivate', text: '×', type: 'button' }),
+  );
+  const deactivateBody = createElement('div', { className: 'modal-body' });
+  const deactivateCopy = createElement('p');
+  deactivateCopy.append(
+    createElement('strong', { className: 'category-deactivate-name' }),
+    document.createTextNode(' dejará de mostrarse en la tienda junto con sus productos. Los productos y pedidos se conservarán.'),
+  );
+  deactivateBody.append(deactivateCopy);
+  const deactivateFoot = createElement('div', { className: 'modal-foot' });
+  deactivateFoot.append(
+    createElement('button', { className: 'secondary cancel-category-deactivate', text: 'Volver', type: 'button' }),
+    createElement('button', { className: 'danger confirm-category-deactivate', text: 'Sí, desactivar', type: 'button' }),
+  );
+  deactivateShell.append(deactivateHead, deactivateBody, deactivateFoot);
+  categoryDeactivateDialog.append(deactivateShell); document.body.append(categoryDeactivateDialog);
+
+  search.addEventListener('input', renderCategories);
+  createButton.addEventListener('click', () => openCategory());
+  $('.close-category').addEventListener('click', () => categoryDialog.close());
+  $('.cancel-category').addEventListener('click', () => categoryDialog.close());
+  nameInput.addEventListener('input', () => {
+    if (!state.editingCategoryId && !categorySlugEdited) slugInput.value = slug(nameInput.value);
+  });
+  slugInput.addEventListener('input', () => { categorySlugEdited = true; });
+  categoryForm.addEventListener('submit', saveCategory);
+  body.addEventListener('click', handleCategoryAction);
+  $$('.cancel-category-deactivate', categoryDeactivateDialog)
+    .forEach((button) => button.addEventListener('click', () => categoryDeactivateDialog.close()));
+  $('.confirm-category-deactivate', categoryDeactivateDialog).addEventListener('click', deactivateCategory);
 }
 
 function initializeUsersInterface() {
@@ -364,7 +494,8 @@ function show(view) {
   $$('.view').forEach((panel) => { panel.hidden = panel.dataset.panel !== view; });
   $$('[data-view]').forEach((link) => link.classList.toggle('active', link.dataset.view === view));
   $('.page-title').textContent = {
-    products: 'Productos', prices: 'Precios', users: 'Usuarios', orders: 'Pedidos y compras',
+    products: 'Productos', prices: 'Precios', categories: 'Categorías',
+    users: 'Usuarios', orders: 'Pedidos y compras',
   }[view] ?? 'Administración';
   history.replaceState(null, '', `#${view === 'dashboard' ? 'resumen' : view}`);
   if (view === 'users' && !state.usersLoaded) loadUsers().catch((error) => toast(error.message, 'error'));
@@ -868,8 +999,177 @@ function renderUsers() {
     appendCell(row, user.lastSignInAt ? new Date(user.lastSignInAt).toLocaleDateString('es-CO') : 'Nunca');
     const edit = createElement('button', { className: 'small-button', text: 'Editar', type: 'button' });
     edit.dataset.editUser = user.id;
-    appendCell(row, edit);
+    appendCell(row, actions);
     body.append(row);
+  }
+}
+
+function renderCategories() {
+  const body = $('.categories-body');
+  if (!body) return;
+  const query = $('.category-search')?.value.trim().toLowerCase() ?? '';
+  const categories = state.categories.filter((category) => (
+    `${category.name} ${category.slug}`.toLowerCase().includes(query)
+  ));
+  body.replaceChildren();
+  if (!categories.length) {
+    body.append(emptyRow(7, 'No hay categorías que coincidan.'));
+    return;
+  }
+
+  for (const category of categories) {
+    const row = createElement('tr');
+    const identity = createElement('div', { className: 'category-identity' });
+    identity.append(
+      createElement('strong', { text: category.name }),
+      createElement('small', { text: category.slug }),
+    );
+    appendCell(row, identity);
+
+    const total = createElement('div', { className: 'category-count' });
+    total.append(
+      createElement('strong', { text: String(category.productCount ?? 0) }),
+      createElement('small', { text: 'en total' }),
+    );
+    appendCell(row, total);
+
+    const published = createElement('div', { className: 'category-count' });
+    published.append(
+      createElement('strong', { text: String(category.activeProductCount ?? 0) }),
+      createElement('small', { text: 'productos activos' }),
+    );
+    appendCell(row, published);
+    appendCell(row, String(category.sortOrder ?? 0), 'category-order');
+    appendCell(row, createElement('span', {
+      className: `status ${category.isActive ? 'active' : 'draft'}`,
+      text: category.isActive ? 'Visible' : 'Oculta',
+    }));
+    appendCell(row, formatDateTime(category.updatedAt), 'category-date');
+
+    const actions = createElement('div', { className: 'actions category-actions' });
+    const products = createElement('button', { className: 'small-button', text: 'Ver productos', type: 'button' });
+    products.dataset.categoryProducts = category.id;
+    const edit = createElement('button', { className: 'small-button', text: 'Editar', type: 'button' });
+    edit.dataset.categoryEdit = category.id;
+    const visibility = createElement('button', {
+      className: `small-button${category.isActive ? ' remove' : ''}`,
+      text: category.isActive ? 'Desactivar' : 'Activar',
+      type: 'button',
+    });
+    if (category.isActive) visibility.dataset.categoryDeactivate = category.id;
+    else visibility.dataset.categoryActivate = category.id;
+    actions.append(products, edit, visibility);
+    appendCell(row, actions);
+    body.append(row);
+  }
+}
+
+function openCategory(category = null) {
+  state.editingCategoryId = category?.id ?? null;
+  categorySlugEdited = Boolean(category);
+  categoryForm.reset();
+  $('.category-form-title').textContent = category ? 'Editar categoría' : 'Nueva categoría';
+  $('.save-category').textContent = category ? 'Guardar cambios' : 'Crear categoría';
+  categoryForm.elements.name.value = category?.name ?? '';
+  categoryForm.elements.slug.value = category?.slug ?? '';
+  categoryForm.elements.sortOrder.value = category?.sortOrder ?? 0;
+  categoryForm.elements.isActive.checked = category?.isActive ?? true;
+  $('.category-error').textContent = '';
+  categoryDialog.showModal();
+}
+
+async function saveCategory(event) {
+  event.preventDefault();
+  const button = $('.save-category');
+  const name = categoryForm.elements.name.value.trim();
+  const categorySlug = categoryForm.elements.slug.value.trim();
+  const sortOrder = Number(categoryForm.elements.sortOrder.value);
+  try {
+    if (!name) throw new Error('Escribe el nombre de la categoría.');
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(categorySlug)) {
+      throw new Error('El slug solo puede contener minúsculas, números y guiones.');
+    }
+    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 100000) {
+      throw new Error('El orden debe ser un número entero entre 0 y 100000.');
+    }
+    button.disabled = true;
+    const editingId = state.editingCategoryId;
+    await api(editingId ? `/api/admin/categories/${editingId}` : '/api/admin/categories', {
+      method: editingId ? 'PATCH' : 'POST',
+      body: JSON.stringify({
+        name, slug: categorySlug, sortOrder,
+        isActive: categoryForm.elements.isActive.checked,
+      }),
+    });
+    categoryDialog.close();
+    await loadCatalog();
+    toast(editingId ? 'Categoría actualizada.' : 'Categoría creada y disponible para asignar productos.');
+  } catch (error) {
+    $('.category-error').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function handleCategoryAction(event) {
+  const productsButton = event.target.closest('[data-category-products]');
+  const editButton = event.target.closest('[data-category-edit]');
+  const deactivateButton = event.target.closest('[data-category-deactivate]');
+  const activateButton = event.target.closest('[data-category-activate]');
+
+  if (productsButton) {
+    const category = state.categories.find((item) => item.id === productsButton.dataset.categoryProducts);
+    if (!category) return;
+    $('.product-search').value = category.name;
+    renderProducts();
+    show('products');
+    toast(`Mostrando los productos de ${category.name}.`);
+    return;
+  }
+  if (editButton) {
+    openCategory(state.categories.find((item) => item.id === editButton.dataset.categoryEdit));
+    return;
+  }
+  if (deactivateButton) {
+    const category = state.categories.find((item) => item.id === deactivateButton.dataset.categoryDeactivate);
+    if (!category) return;
+    state.deactivateCategoryId = category.id;
+    $('.category-deactivate-name').textContent = category.name;
+    categoryDeactivateDialog.showModal();
+    return;
+  }
+  if (activateButton) {
+    const category = state.categories.find((item) => item.id === activateButton.dataset.categoryActivate);
+    if (!category) return;
+    activateButton.disabled = true;
+    try {
+      await api(`/api/admin/categories/${category.id}`, {
+        method: 'PATCH', body: JSON.stringify({ isActive: true }),
+      });
+      await loadCatalog();
+      toast(`${category.name} vuelve a estar visible en la tienda.`);
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      activateButton.disabled = false;
+    }
+  }
+}
+
+async function deactivateCategory() {
+  const button = $('.confirm-category-deactivate');
+  const category = state.categories.find((item) => item.id === state.deactivateCategoryId);
+  if (!category) return;
+  try {
+    button.disabled = true;
+    await api(`/api/admin/categories/${category.id}`, { method: 'DELETE' });
+    categoryDeactivateDialog.close();
+    await loadCatalog();
+    toast(`${category.name} se ocultó; sus productos y pedidos se conservaron.`);
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -922,7 +1222,7 @@ async function saveUser(event) {
   }
 }
 
-function render() { renderProducts(); renderPrices(); }
+function render() { renderProducts(); renderPrices(); renderCategories(); }
 
 async function loadCatalog() {
   const data = await api('/api/admin/catalog');
@@ -951,8 +1251,9 @@ async function load() {
     await loadCatalog();
     show(location.hash === '#productos' ? 'products'
       : location.hash === '#precios' ? 'prices'
-        : location.hash === '#usuarios' ? 'users'
-          : location.hash === '#pedidos' ? 'orders' : 'dashboard');
+        : location.hash === '#categorias' ? 'categories'
+          : location.hash === '#usuarios' ? 'users'
+            : location.hash === '#pedidos' ? 'orders' : 'dashboard');
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -1070,6 +1371,7 @@ $('.prices-body').addEventListener('click', async (event) => {
 });
 
 initializeMediaInterface();
+initializeCategoriesInterface();
 initializeOrdersInterface();
 initializeUsersInterface();
 $('.product-search').addEventListener('input', renderProducts);

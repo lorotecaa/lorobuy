@@ -6,6 +6,10 @@ const toast = $('.toast');
 const cartDrawer = $('.cart-drawer');
 const drawerBackdrop = $('.drawer-backdrop');
 let toastTimer;
+let featuredPlaylist;
+let showcaseRotation;
+let showcaseObserver;
+let showcaseActiveVideo;
 
 function element(tag, { className, text, type } = {}) {
   const node = document.createElement(tag);
@@ -28,6 +32,87 @@ function safeVideo(value) {
   const local = /^\/?assets\/[a-z0-9/_-]+\.(?:mp4|webm)(?:\?v=[a-z0-9-]+)?$/i.test(value || '');
   const storage = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/product-media\/[a-z0-9/_-]+\.(?:mp4|webm|mov)(?:\?.*)?$/i.test(value || '');
   return local || storage ? value : '/assets/hero.mp4?v=20261005-stream-1';
+}
+
+function productVideoSources(product) {
+  const sources = [];
+  const seen = new Set();
+  const add = (url, label) => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    sources.push({ url, label: label || `Animación ${sources.length + 1}` });
+  };
+  for (const media of Array.isArray(product?.media) ? product.media : []) {
+    if (media?.type === 'video') add(media.url, media.altText);
+  }
+  add(product?.previewPath, `Vista previa de ${product?.name || 'este pack'}`);
+  return sources;
+}
+
+function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
+  const sources = productVideoSources(product);
+  let index = 0;
+  let visible = false;
+  let destroyed = false;
+  let failedSources = 0;
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const updateIndex = () => onIndex?.(index, sources.length, sources[index]);
+  const play = () => {
+    if (destroyed || reducedMotion || !visible || !sources.length) return;
+    video.play().catch(() => {});
+  };
+  const load = (nextIndex) => {
+    if (!sources.length || destroyed) return;
+    index = (nextIndex + sources.length) % sources.length;
+    video.classList.remove('is-playing');
+    video.loop = sources.length === 1;
+    video.src = safeVideo(sources[index].url);
+    video.load();
+    updateIndex();
+    onProgress?.(0);
+    play();
+  };
+  const handlePlaying = () => video.classList.add('is-playing');
+  const handleEnded = () => {
+    failedSources = 0;
+    if (sources.length > 1) load(index + 1);
+  };
+  const handleError = () => {
+    video.classList.remove('is-playing');
+    failedSources += 1;
+    if (sources.length > 1 && failedSources < sources.length) load(index + 1);
+  };
+  const handleTime = () => {
+    const ratio = Number.isFinite(video.duration) && video.duration > 0 ? video.currentTime / video.duration : 0;
+    onProgress?.(Math.min(1, Math.max(0, ratio)));
+  };
+  video.addEventListener('playing', handlePlaying);
+  video.addEventListener('ended', handleEnded);
+  video.addEventListener('error', handleError);
+  video.addEventListener('timeupdate', handleTime);
+  const observer = new IntersectionObserver((entries) => {
+    visible = entries[0]?.isIntersecting === true;
+    if (visible) play();
+    else video.pause();
+  }, { threshold: 0.18 });
+  observer.observe(video);
+  if (sources.length) load(0);
+
+  return {
+    sources,
+    destroy() {
+      destroyed = true;
+      observer.disconnect();
+      video.pause();
+      video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('error', handleError);
+      video.removeEventListener('timeupdate', handleTime);
+      video.removeAttribute('src');
+      video.load();
+    },
+  };
 }
 
 function productKind(product) {
@@ -137,17 +222,64 @@ function applyFilters() {
 
 function renderShowcase(products) {
   const showcase = $('.showcase-grid');
+  clearInterval(showcaseRotation);
+  showcaseObserver?.disconnect();
+  showcaseActiveVideo?.pause();
+  showcaseActiveVideo = null;
   showcase.replaceChildren();
-  for (const product of products.slice(0, 4)) {
+  const featuredProducts = products.slice(0, 4);
+  for (const product of featuredProducts) {
     const link = element('a', { className: 'showcase-item' });
     link.href = `/products/${encodeURIComponent(product.slug)}`;
     link.setAttribute('aria-label', `Ver ${product.name}`);
     const image = element('img');
     image.src = safeImage(product.imagePath);
     image.alt = product.name;
-    link.append(image, element('span', { text: product.name }));
+    const video = element('video');
+    video.muted = true;
+    video.loop = true;
+    video.playsInline = true;
+    video.preload = 'none';
+    video.disablePictureInPicture = true;
+    video.setAttribute('aria-hidden', 'true');
+    const source = productVideoSources(product)[0];
+    if (source) video.dataset.source = safeVideo(source.url);
+    link.append(image, video, element('span', { className: 'showcase-live', text: 'En vivo' }), element('span', { className: 'showcase-name', text: product.name }));
     showcase.append(link);
   }
+
+  const items = $$('.showcase-item', showcase);
+  if (!items.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let activeIndex = -1;
+  let visible = false;
+  const activate = (nextIndex) => {
+    if (!visible) return;
+    const item = items[nextIndex % items.length];
+    const video = $('video', item);
+    showcaseActiveVideo?.pause();
+    items.forEach((entry) => entry.classList.remove('is-live'));
+    $$('video', showcase).forEach((entry) => entry.classList.remove('is-playing'));
+    activeIndex = nextIndex % items.length;
+    item.classList.add('is-live');
+    showcaseActiveVideo = video;
+    if (!video?.dataset.source) return;
+    if (!video.src) {
+      video.src = video.dataset.source;
+      video.load();
+    }
+    try { video.currentTime = 0; } catch {}
+    video.play().then(() => video.classList.add('is-playing')).catch(() => {});
+  };
+  showcaseObserver = new IntersectionObserver((entries) => {
+    visible = entries[0]?.isIntersecting === true;
+    if (!visible) {
+      showcaseActiveVideo?.pause();
+      return;
+    }
+    activate(activeIndex < 0 ? 0 : activeIndex);
+  }, { threshold: 0.18 });
+  showcaseObserver.observe(showcase);
+  showcaseRotation = setInterval(() => activate(activeIndex + 1), 6500);
 }
 
 function renderNewest(product) {
@@ -159,6 +291,20 @@ function renderNewest(product) {
   const image = $('img', media);
   image.src = safeImage(product.imagePath);
   image.alt = product.name;
+  const video = $('.newest-video', media);
+  video.poster = image.src;
+  featuredPlaylist?.destroy();
+  featuredPlaylist = createSequentialPlayer(video, product, {
+    onIndex(index, total, source) {
+      $('[data-newest-current]').textContent = String(index + 1);
+      $('[data-newest-total]').textContent = String(total);
+      $('[data-newest-video-name]').textContent = source?.label || product.name;
+    },
+    onProgress(ratio) {
+      $('.newest-progress>i').style.width = `${ratio * 100}%`;
+    },
+  });
+  media.classList.toggle('no-video', featuredPlaylist.sources.length === 0);
   $('#newestTitle').textContent = product.name;
   $('.newest-description').textContent = product.description || 'Una colección coordinada para darle más energía a regalos, batallas y momentos especiales de tu LIVE.';
   const price = $('.newest-price');
@@ -181,8 +327,9 @@ async function loadProducts() {
     $('[data-pack-count]').textContent = String(state.products.length);
     $('[data-mega-count]').textContent = String(mega.length);
     $('[data-battle-count]').textContent = String(battle.length);
-    renderShowcase(state.products);
-    renderNewest([...state.products].sort((a, b) => a.sortOrder - b.sortOrder)[0]);
+    const ordered = [...state.products].sort((a, b) => a.sortOrder - b.sortOrder);
+    renderShowcase(ordered);
+    renderNewest(ordered.find((product) => product.slug === 'mega-pack-dioses-nordicos') || ordered[0]);
     applyFilters();
   } catch (error) {
     grid.replaceChildren(element('div', { className: 'loading-card', text: error.message }));

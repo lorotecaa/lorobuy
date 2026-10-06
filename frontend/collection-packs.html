@@ -76,7 +76,14 @@
 
     <section class="newest-section" aria-labelledby="newestTitle">
       <div class="shell newest-card">
-        <a class="newest-media" href="#productos" aria-label="Ver el pack destacado"><img src="/assets/favicon.png" alt=""><span>Nuevo</span></a>
+        <a class="newest-media" href="#productos" aria-label="Ver el pack destacado">
+          <img class="newest-fallback" src="/assets/favicon.png" alt="">
+          <video class="newest-video" muted playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noremoteplayback" aria-hidden="true"></video>
+          <span class="newest-live"><i></i> Vista en tiempo real</span>
+          <span class="newest-sequence">Video <b data-newest-current>0</b>/<b data-newest-total>0</b></span>
+          <span class="newest-video-name" data-newest-video-name></span>
+          <span class="newest-progress" aria-hidden="true"><i></i></span>
+        </a>
         <div class="newest-copy">
           <span class="eyebrow">El más nuevo</span>
           <h2 id="newestTitle">Preparando el pack destacado…</h2>

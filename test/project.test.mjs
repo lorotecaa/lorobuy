@@ -215,6 +215,11 @@ test('packs CTA opens a complete Supabase-backed collection page', () => {
   assert.match(packsCollectionScript, /fetch\('\/api\/cart\/items'/);
   assert.match(packsCollectionScript, /method: 'DELETE'/);
   assert.match(packsCollectionScript, /fetch\('\/api\/checkout'/);
+  assert.match(packsCollectionHtml, /class="newest-video"/);
+  assert.match(packsCollectionScript, /Array\.isArray\(product\?\.media\)/);
+  assert.match(packsCollectionScript, /function createSequentialPlayer/);
+  assert.match(packsCollectionScript, /video\.addEventListener\('ended', handleEnded\)/);
+  assert.match(packsCollectionScript, /product\.slug === 'mega-pack-dioses-nordicos'/);
   assert.doesNotMatch(packsCollectionScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
 });
 

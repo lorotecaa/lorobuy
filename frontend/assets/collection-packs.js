@@ -1,5 +1,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const DISCOUNT_STORAGE_KEY = 'lorobuy-welcome-discount-v1';
 const state = { products: [], filter: 'all', query: '', sort: 'featured', cart: null };
 const grid = $('.product-grid');
 const toast = $('.toast');
@@ -21,6 +22,15 @@ function element(tag, { className, text, type } = {}) {
 
 function money(cents, currency = 'USD') {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(Number(cents || 0) / 100);
+}
+
+function savedDiscountCode() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DISCOUNT_STORAGE_KEY) || 'null');
+    return /^[A-Z0-9]{3,256}$/.test(saved?.code || '') ? saved.code : null;
+  } catch {
+    return null;
+  }
 }
 
 function safeImage(value) {
@@ -452,7 +462,7 @@ async function startCheckout(productId, button) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ productId }),
+      body: JSON.stringify({ productId, discountCode: savedDiscountCode() }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'No fue posible iniciar el pago.');
@@ -568,9 +578,17 @@ $('.newsletter-form').addEventListener('submit', async (event) => {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'No fue posible guardar el correo.');
+    if (!data.discount?.code) throw new Error('No fue posible crear el código.');
+    try {
+      localStorage.setItem(DISCOUNT_STORAGE_KEY, JSON.stringify({
+        code: data.discount.code,
+        email: input.value.trim(),
+        percent: 10,
+      }));
+    } catch {}
     input.value = '';
-    button.textContent = '¡Suscrito!';
-    showToast('Tu correo quedó registrado.');
+    button.textContent = '¡10% guardado!';
+    showToast(`Código ${data.discount.code} guardado y listo para tu compra.`);
   } catch (error) {
     button.textContent = original;
     showToast(error.message, false);

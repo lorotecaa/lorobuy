@@ -19,6 +19,7 @@ import {
 import { loadConfig } from './config.mjs';
 import {
   createLemonSqueezyCheckout,
+  createLemonSqueezyDiscount,
   parseLemonSqueezyWebhook,
   verifyLemonSqueezySignature,
 } from './payments.mjs';
@@ -169,6 +170,7 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const IMAGE_PATTERN = /^assets\/[a-z0-9-]+\.(?:webp|png|jpe?g)$/i;
 const LOCAL_MEDIA_PATTERN = /^assets\/(?:previews\/)?[a-z0-9-]+\.(?:mp4|webm|webp|png|jpe?g|gif)$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DISCOUNT_CODE_PATTERN = /^[A-Z0-9]{3,256}$/;
 const MIN_PASSWORD_LENGTH = 6;
 const PRIMARY_ADMIN_EMAIL = 'loroteca98@gmail.com';
 const MEDIA_ASSET_VERSION = '20261005-stream-1';
@@ -258,6 +260,80 @@ function productMedia(row) {
     mimeType: row.mime_type,
     uploaded: Boolean(row.storage_path),
   };
+}
+
+function generateWelcomeDiscountCode() {
+  return `LORO10${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+}
+
+async function issueWelcomeDiscount(email) {
+  const fields = 'id,email,status,discount_code,discount_provider_id';
+  const { data: subscription, error: readError } = await adminSupabase
+    .from('newsletter_subscriptions')
+    .select(fields)
+    .eq('email', email)
+    .maybeSingle();
+  if (readError || !subscription) {
+    throw new Error(`Unable to load the newsletter subscription: ${readError?.code ?? 'not_found'} ${readError?.message ?? ''}`.trim());
+  }
+
+  if (subscription.discount_code && subscription.discount_provider_id) {
+    if (subscription.status !== 'subscribed') {
+      await adminSupabase.from('newsletter_subscriptions').update({ status: 'subscribed' }).eq('id', subscription.id);
+    }
+    return subscription.discount_code;
+  }
+
+  const previousCode = subscription.discount_code;
+  const code = generateWelcomeDiscountCode();
+  let claim = adminSupabase
+    .from('newsletter_subscriptions')
+    .update({ discount_code: code })
+    .eq('id', subscription.id)
+    .is('discount_provider_id', null);
+  claim = previousCode ? claim.eq('discount_code', previousCode) : claim.is('discount_code', null);
+  const { data: claimed, error: claimError } = await claim.select(fields).maybeSingle();
+  if (claimError) {
+    throw new Error(`Unable to reserve the newsletter discount: ${claimError.code ?? 'database_error'} ${claimError.message ?? ''}`.trim());
+  }
+  if (!claimed) {
+    const { data: current, error: currentError } = await adminSupabase
+      .from('newsletter_subscriptions')
+      .select(fields)
+      .eq('id', subscription.id)
+      .maybeSingle();
+    if (currentError || !current?.discount_code || !current?.discount_provider_id) {
+      throw new Error('The newsletter discount is still being prepared.');
+    }
+    return current.discount_code;
+  }
+
+  try {
+    const fingerprint = crypto.createHash('sha256').update(email).digest('hex').slice(0, 10).toUpperCase();
+    const created = await createLemonSqueezyDiscount(config, {
+      code,
+      name: `Bienvenida LoroBuy ${fingerprint}`,
+    });
+    const { error: saveError } = await adminSupabase
+      .from('newsletter_subscriptions')
+      .update({
+        status: 'subscribed',
+        discount_provider_id: created.discountId,
+        discount_created_at: new Date().toISOString(),
+      })
+      .eq('id', subscription.id)
+      .eq('discount_code', code);
+    if (saveError) throw new Error('Unable to save the newsletter discount.');
+    return code;
+  } catch (error) {
+    await adminSupabase
+      .from('newsletter_subscriptions')
+      .update({ discount_code: null })
+      .eq('id', subscription.id)
+      .eq('discount_code', code)
+      .is('discount_provider_id', null);
+    throw error;
+  }
 }
 
 function runFfmpeg(argumentsList) {
@@ -639,6 +715,21 @@ app.post('/api/checkout', asyncRoute(async (request, response) => {
 
   const productId = request.body?.productId;
   if (!isUuid(productId)) return response.status(400).json({ error: 'Producto no válido.' });
+  const requestedDiscountCode = normalizeText(request.body?.discountCode, 256).toUpperCase();
+  let discountCode = null;
+  if (requestedDiscountCode) {
+    if (!DISCOUNT_CODE_PATTERN.test(requestedDiscountCode)) {
+      return response.status(400).json({ error: 'Código de descuento no válido.' });
+    }
+    const { data: discount, error: discountError } = await adminSupabase
+      .from('newsletter_subscriptions')
+      .select('discount_code')
+      .eq('discount_code', requestedDiscountCode)
+      .not('discount_provider_id', 'is', null)
+      .maybeSingle();
+    if (discountError) throw new Error('Unable to validate the newsletter discount.');
+    if (discount?.discount_code) discountCode = discount.discount_code;
+  }
 
   const session = await getRequestSession(request, response, config, { createAnonymous: true });
   const attemptToken = crypto.randomUUID();
@@ -668,6 +759,7 @@ app.post('/api/checkout', asyncRoute(async (request, response) => {
       productSlug: pendingOrder.product_slug,
       email: session.user.is_anonymous ? null : session.user.email,
       name: profile?.display_name ?? null,
+      discountCode,
     });
   } catch (checkoutError) {
     await adminSupabase
@@ -748,12 +840,20 @@ app.get('/api/orders/:orderId', asyncRoute(async (request, response) => {
 app.post('/api/newsletter', asyncRoute(async (request, response) => {
   const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
   if (!email || !EMAIL_PATTERN.test(email)) return response.status(400).json({ error: 'Correo electrónico no válido.' });
+  if (!config.paymentsConfigured || !adminSupabase) {
+    return response.status(503).json({ error: 'La promoción no está disponible temporalmente.' });
+  }
 
   const session = await getRequestSession(request, response, config);
   const client = session?.client ?? publicSupabase;
   const { error } = await client.rpc('subscribe_newsletter', { p_email: email });
   if (error) throw new Error('Unable to save newsletter subscription in Supabase.');
-  return response.status(202).json({ accepted: true });
+  const discountCode = await issueWelcomeDiscount(email);
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.status(201).json({
+    accepted: true,
+    discount: { code: discountCode, percent: 10 },
+  });
 }));
 
 app.post('/api/downloads/:fileId', asyncRoute(async (request, response) => {

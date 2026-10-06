@@ -119,6 +119,12 @@ create table public.newsletter_subscriptions (
     and email ~ '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$'
   ),
   status text not null default 'pending' check (status in ('pending', 'subscribed', 'unsubscribed')),
+  discount_code text check (
+    discount_code is null
+    or (char_length(discount_code) between 3 and 256 and discount_code ~ '^[A-Z0-9]+$')
+  ),
+  discount_provider_id text,
+  discount_created_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -137,6 +143,10 @@ create index order_items_order_idx on public.order_items (order_id);
 create index order_items_product_idx on public.order_items (product_id);
 create index downloads_user_date_idx on public.downloads (user_id, downloaded_at desc);
 create index downloads_file_idx on public.downloads (product_file_id);
+create unique index newsletter_subscriptions_discount_code_key
+  on public.newsletter_subscriptions (discount_code)
+  where discount_code is not null;
+grant select, update on table public.newsletter_subscriptions to service_role;
 
 create or replace function public.set_updated_at()
 returns trigger

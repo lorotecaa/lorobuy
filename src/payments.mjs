@@ -63,7 +63,7 @@ export function buildLemonSqueezyCheckoutBody(config, order) {
       media: false,
       logo: true,
       desc: false,
-      discount: false,
+      discount: true,
       locale: 'es',
       background_color: '#0b0a12',
       headings_color: '#ffffff',
@@ -89,6 +89,9 @@ export function buildLemonSqueezyCheckoutBody(config, order) {
 
   if (order.email) attributes.checkout_data.email = order.email;
   if (order.name) attributes.checkout_data.name = order.name;
+  if (/^[A-Z0-9]{3,256}$/.test(order.discountCode ?? '')) {
+    attributes.checkout_data.discount_code = order.discountCode;
+  }
 
   return {
     data: {
@@ -100,6 +103,51 @@ export function buildLemonSqueezyCheckoutBody(config, order) {
       },
     },
   };
+}
+
+export function buildLemonSqueezyDiscountBody(config, discount) {
+  if (!/^[A-Z0-9]{3,256}$/.test(discount.code ?? '')) {
+    throw new Error('The Lemon Squeezy discount code is invalid.');
+  }
+  return {
+    data: {
+      type: 'discounts',
+      attributes: {
+        name: discount.name,
+        code: discount.code,
+        amount: 10,
+        amount_type: 'percent',
+        is_limited_to_products: false,
+        is_limited_redemptions: true,
+        max_redemptions: 1,
+        duration: 'once',
+        test_mode: config.lemonSqueezyTestMode,
+      },
+      relationships: {
+        store: { data: { type: 'stores', id: String(config.lemonSqueezyStoreId) } },
+      },
+    },
+  };
+}
+
+export async function createLemonSqueezyDiscount(config, discount) {
+  const response = await fetch(`${LEMON_SQUEEZY_API}/discounts`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/vnd.api+json',
+      'Content-Type': 'application/vnd.api+json',
+      Authorization: `Bearer ${config.lemonSqueezyApiKey}`,
+    },
+    body: JSON.stringify(buildLemonSqueezyDiscountBody(config, discount)),
+    signal: AbortSignal.timeout(12_000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  const providerId = payload?.data?.id;
+  const providerCode = payload?.data?.attributes?.code;
+  if (!response.ok || !providerId || providerCode !== discount.code) {
+    throw new Error(`Lemon Squeezy discount creation failed with status ${response.status}.`);
+  }
+  return { discountId: String(providerId), code: providerCode };
 }
 
 export async function createLemonSqueezyCheckout(config, order) {

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../src/config.mjs';
 import {
   buildLemonSqueezyCheckoutBody,
+  buildLemonSqueezyDiscountBody,
   parseLemonSqueezyWebhook,
   verifyLemonSqueezySignature,
 } from '../src/payments.mjs';
@@ -46,6 +47,7 @@ const adminCatalogMigration = fs.readFileSync(path.join(root, 'supabase', 'migra
 const adminUsersMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040003_admin_users.sql'), 'utf8');
 const productMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610050001_product_media_gallery.sql'), 'utf8');
 const sharedMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060001_shared_product_media.sql'), 'utf8');
+const welcomeDiscountMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060003_newsletter_welcome_discounts.sql'), 'utf8');
 const adminOrderActionsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060002_admin_order_actions.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
@@ -139,12 +141,24 @@ test('checkout is external and paid access is granted only by a signed idempoten
     amountCents: 13900,
     productName: 'Mega Pack Dioses Nórdicos',
     productSlug: 'mega-pack-dioses-nordicos',
+    discountCode: 'LORO10ABC123',
   });
   assert.equal(body.data.attributes.custom_price, 13900);
   assert.equal(body.data.attributes.checkout_options.embed, false);
-  assert.equal(body.data.attributes.checkout_options.discount, false);
+  assert.equal(body.data.attributes.checkout_options.discount, true);
+  assert.equal(body.data.attributes.checkout_data.discount_code, 'LORO10ABC123');
   assert.equal(body.data.relationships.variant.data.id, '9876');
   assert.match(body.data.attributes.product_options.redirect_url, /^https:\/\/lorobuy\.onrender\.com\/products\//);
+
+  const discountBody = buildLemonSqueezyDiscountBody(config, {
+    name: 'Bienvenida LoroBuy TEST',
+    code: 'LORO10ABC123',
+  });
+  assert.equal(discountBody.data.attributes.amount, 10);
+  assert.equal(discountBody.data.attributes.amount_type, 'percent');
+  assert.equal(discountBody.data.attributes.is_limited_redemptions, true);
+  assert.equal(discountBody.data.attributes.max_redemptions, 1);
+  assert.equal(discountBody.data.attributes.test_mode, true);
 
   const webhookBody = Buffer.from(JSON.stringify({
     meta: { event_name: 'order_created', custom_data: {} },
@@ -200,6 +214,19 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(productHtml, /data-add/);
   assert.match(server, /app\.get\('\/api\/products\/:slug'/);
   assert.match(server, /app\.get\('\/products\/:slug'/);
+});
+
+test('welcome offer creates a real single-use Lemon Squeezy discount and applies it at checkout', () => {
+  assert.match(welcomeDiscountMigration, /add column if not exists discount_code text/);
+  assert.match(welcomeDiscountMigration, /newsletter_subscriptions_discount_code_key/);
+  assert.match(paymentsSource, /createLemonSqueezyDiscount/);
+  assert.match(paymentsSource, /is_limited_redemptions: true/);
+  assert.match(server, /issueWelcomeDiscount\(email\)/);
+  assert.match(server, /discountCode,/);
+  assert.match(html, /data-discount-result/);
+  assert.match(html, /lorobuy-welcome-discount-v1/);
+  assert.match(productHtml, /discountCode:savedDiscountCode\(\)/);
+  assert.match(packsCollectionScript, /discountCode: savedDiscountCode\(\)/);
 });
 
 test('packs CTA opens a complete Supabase-backed collection page', () => {

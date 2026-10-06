@@ -56,6 +56,9 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
   let destroyed = false;
   let failedSources = 0;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  video.autoplay = true;
+  video.defaultMuted = true;
+  video.muted = true;
 
   const updateIndex = () => onIndex?.(index, sources.length, sources[index]);
   const play = () => {
@@ -74,6 +77,7 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
     play();
   };
   const handlePlaying = () => video.classList.add('is-playing');
+  const handleCanPlay = () => play();
   const handleEnded = () => {
     failedSources = 0;
     if (sources.length > 1) load(index + 1);
@@ -88,6 +92,7 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
     onProgress?.(Math.min(1, Math.max(0, ratio)));
   };
   video.addEventListener('playing', handlePlaying);
+  video.addEventListener('canplay', handleCanPlay);
   video.addEventListener('ended', handleEnded);
   video.addEventListener('error', handleError);
   video.addEventListener('timeupdate', handleTime);
@@ -106,6 +111,7 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
       observer.disconnect();
       video.pause();
       video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('error', handleError);
       video.removeEventListener('timeupdate', handleTime);
@@ -237,6 +243,8 @@ function renderShowcase(products) {
     image.alt = product.name;
     const video = element('video');
     video.muted = true;
+    video.defaultMuted = true;
+    video.autoplay = true;
     video.loop = true;
     video.playsInline = true;
     video.preload = 'none';
@@ -264,9 +272,13 @@ function renderShowcase(products) {
     showcaseActiveVideo = video;
     if (!video?.dataset.source) return;
     if (!video.src) {
+      video.preload = 'auto';
       video.src = video.dataset.source;
       video.load();
     }
+    video.oncanplay = () => {
+      if (visible && showcaseActiveVideo === video) video.play().then(() => video.classList.add('is-playing')).catch(() => {});
+    };
     try { video.currentTime = 0; } catch {}
     video.play().then(() => video.classList.add('is-playing')).catch(() => {});
   };

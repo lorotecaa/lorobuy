@@ -11,7 +11,12 @@ import {
   verifyLemonSqueezySignature,
 } from '../src/payments.mjs';
 import { buildContentSecurityPolicy } from '../src/security.mjs';
-import { assertHighDefinitionDimensions, readMp4Dimensions } from '../scripts/video-quality.mjs';
+import {
+  assertHighDefinitionDimensions,
+  inspectMp4Delivery,
+  MAX_STOREFRONT_VIDEO_BYTES,
+  readMp4Dimensions,
+} from '../scripts/video-quality.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
@@ -204,10 +209,18 @@ test('hero battle animates donations, time, progress, and round result', () => {
 });
 
 test('storefront videos meet the display quality floor', async () => {
-  const dimensions = await readMp4Dimensions(path.join(root, 'frontend', 'assets', 'hero.mp4'));
-  const nordicPreview = await readMp4Dimensions(path.join(root, 'frontend', 'assets', 'previews', 'mega-pack-dioses-nordicos.mp4'));
+  const heroPath = path.join(root, 'frontend', 'assets', 'hero.mp4');
+  const nordicPath = path.join(root, 'frontend', 'assets', 'previews', 'mega-pack-dioses-nordicos.mp4');
+  const dimensions = await readMp4Dimensions(heroPath);
+  const nordicPreview = await readMp4Dimensions(nordicPath);
+  const heroDelivery = await inspectMp4Delivery(heroPath);
+  const nordicDelivery = await inspectMp4Delivery(nordicPath);
   assert.deepEqual(dimensions, { width: 1920, height: 1080 });
   assert.deepEqual(nordicPreview, { width: 606, height: 1080 });
+  assert.equal(heroDelivery.fastStart, true);
+  assert.equal(nordicDelivery.fastStart, true);
+  assert.ok(heroDelivery.byteSize <= MAX_STOREFRONT_VIDEO_BYTES);
+  assert.ok(nordicDelivery.byteSize <= MAX_STOREFRONT_VIDEO_BYTES);
   assert.doesNotThrow(() => assertHighDefinitionDimensions({ width: 606, height: 1080 }, 'Portrait preview'));
   assert.throws(() => assertHighDefinitionDimensions({ width: 960, height: 540 }, 'Low quality preview'), /requires at least/);
   assert.throws(() => assertHighDefinitionDimensions({ width: 1280, height: 720 }, 'Low quality landscape'), /requires at least/);

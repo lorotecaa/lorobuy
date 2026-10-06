@@ -22,7 +22,8 @@ await requirePath(path.join(sourceDirectory, 'assets'), 'Frontend assets directo
 
 const checkedVideos = await validateStorefrontVideoQuality(sourceDirectory);
 for (const video of checkedVideos) {
-  console.log(`Verified high-resolution video: ${path.relative(sourceDirectory, video.path)} (${video.width}x${video.height})`);
+  const megabytes = (video.byteSize / (1024 * 1024)).toFixed(1);
+  console.log(`Verified streaming video: ${path.relative(sourceDirectory, video.path)} (${video.width}x${video.height}, ${megabytes} MB, fast start)`);
 }
 
 await fs.rm(stagingDirectory, { recursive: true, force: true });

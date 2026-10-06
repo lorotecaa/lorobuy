@@ -155,6 +155,7 @@ const LOCAL_MEDIA_PATTERN = /^assets\/(?:previews\/)?[a-z0-9-]+\.(?:mp4|webm|web
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
 const PRIMARY_ADMIN_EMAIL = 'loroteca98@gmail.com';
+const MEDIA_ASSET_VERSION = '20261005-stream-1';
 const MAX_PRODUCT_MEDIA_BYTES = 100 * 1024 * 1024;
 const PRODUCT_MEDIA_MIME_TYPES = new Map([
   ['image/jpeg', { type: 'image', extension: 'jpg' }],
@@ -224,7 +225,9 @@ function publicSignupError(error) {
 }
 
 function productMedia(row) {
-  const localPath = LOCAL_MEDIA_PATTERN.test(row.source_path ?? '') ? `/${row.source_path}` : null;
+  const localPath = LOCAL_MEDIA_PATTERN.test(row.source_path ?? '')
+    ? `/${row.source_path}?v=${MEDIA_ASSET_VERSION}`
+    : null;
   const publicUrl = row.storage_path
     ? publicSupabase.storage.from('product-media').getPublicUrl(row.storage_path).data.publicUrl
     : null;
@@ -256,7 +259,7 @@ function publicProduct(row, mediaRows = []) {
     name: row.name,
     description: row.description,
     imagePath,
-    previewPath,
+    previewPath: `${previewPath}?v=${MEDIA_ASSET_VERSION}`,
     previewThumbnailPath,
     priceCents: row.price_cents,
     compareAtPriceCents: row.compare_at_price_cents,

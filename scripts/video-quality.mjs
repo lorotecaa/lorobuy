@@ -4,6 +4,7 @@ import path from 'node:path';
 export const MIN_VIDEO_HEIGHT = 1080;
 export const MIN_PORTRAIT_WIDTH = 600;
 export const MIN_LANDSCAPE_WIDTH = 1920;
+export const MAX_STOREFRONT_VIDEO_BYTES = 30 * 1024 * 1024;
 
 export function assertHighDefinitionDimensions(dimensions, label = 'Video') {
   const { width, height } = dimensions;
@@ -62,6 +63,15 @@ export async function readMp4Dimensions(filePath) {
   return dimensions.sort((left, right) => (right.width * right.height) - (left.width * left.height))[0];
 }
 
+export async function inspectMp4Delivery(filePath) {
+  const buffer = await fs.readFile(filePath);
+  const boxes = listBoxes(buffer);
+  const moov = boxes.find((box) => box.type === 'moov');
+  const mediaData = boxes.find((box) => box.type === 'mdat');
+  if (!moov || !mediaData) throw new Error('MP4 metadata or media data was not found.');
+  return { byteSize: buffer.length, fastStart: moov.start < mediaData.start };
+}
+
 async function findMp4Files(directory) {
   let entries;
   try {
@@ -88,14 +98,22 @@ export async function validateStorefrontVideoQuality(frontendDirectory) {
 
   for (const videoPath of videos) {
     let dimensions;
+    let delivery;
     try {
       dimensions = await readMp4Dimensions(videoPath);
+      delivery = await inspectMp4Delivery(videoPath);
     } catch (error) {
       throw new Error(`Unable to inspect video ${path.relative(frontendDirectory, videoPath)}: ${error.message}`);
     }
 
     assertHighDefinitionDimensions(dimensions, `Video ${path.relative(frontendDirectory, videoPath)}`);
-    results.push({ path: videoPath, ...dimensions });
+    if (!delivery.fastStart) {
+      throw new Error(`Video ${path.relative(frontendDirectory, videoPath)} must place MP4 metadata before media data for progressive playback.`);
+    }
+    if (delivery.byteSize > MAX_STOREFRONT_VIDEO_BYTES) {
+      throw new Error(`Video ${path.relative(frontendDirectory, videoPath)} is too large for storefront streaming (${delivery.byteSize} bytes). Maximum: ${MAX_STOREFRONT_VIDEO_BYTES} bytes.`);
+    }
+    results.push({ path: videoPath, ...dimensions, ...delivery });
   }
 
   return results;

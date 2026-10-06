@@ -36,6 +36,7 @@ const nordicsPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migra
 const catalogPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040001_map_catalog_lemon_test_variant.sql'), 'utf8');
 const adminCatalogMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040002_admin_products_prices.sql'), 'utf8');
 const adminUsersMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040003_admin_users.sql'), 'utf8');
+const productMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610050001_product_media_gallery.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -177,11 +178,9 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(html, /article\.addEventListener\('pointerenter',play\)/);
   assert.match(html, /\/products\/\$\{encodeURIComponent\(product\.slug\)\}/);
   assert.match(productHtml, /id="productVideo"/);
-  assert.match(productHtml, /<video id="videoThumb"/);
-  assert.match(productHtml, /videoThumb\.src=videoUrl/);
-  assert.match(productHtml, /videoThumb\.poster=videoThumbnailUrl/);
-  assert.match(productHtml, /videoThumb\.removeAttribute\('poster'\)/);
-  assert.doesNotMatch(productHtml, /videoThumb\.src=imageUrl/);
+  assert.match(productHtml, /function renderGallery\(item,imageUrl\)/);
+  assert.match(productHtml, /Array\.isArray\(item\.media\)/);
+  assert.match(productHtml, /product-media/);
   assert.match(productHtml, /controlslist="nodownload noremoteplayback"/);
   assert.match(productHtml, /id="descriptionTitle"/);
   assert.match(productHtml, /function productCopy\(item\)/);
@@ -254,6 +253,23 @@ test('every application table enables RLS', () => {
   for (const table of ['payment_provider_variants', 'payment_attempts', 'payment_events']) {
     assert.match(paymentsMigration, new RegExp(`alter table public\\.${table} enable row level security;`));
   }
+  assert.match(productMediaMigration, /alter table public\.product_media enable row level security;/);
+});
+
+test('every product has an administrator-managed image and video gallery', () => {
+  assert.match(productMediaMigration, /create table public\.product_media/);
+  assert.match(productMediaMigration, /create policy product_media_public_select/);
+  assert.match(productMediaMigration, /create policy product_media_admin_all/);
+  assert.match(productMediaMigration, /'product-media'/);
+  assert.match(productMediaMigration, /file_size_limit = excluded\.file_size_limit/);
+  assert.match(server, /app\.get\('\/api\/admin\/products\/:productId\/media'/);
+  assert.match(server, /app\.post\(\s*'\/api\/admin\/products\/:productId\/media'/);
+  assert.match(server, /app\.patch\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
+  assert.match(server, /app\.delete\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
+  assert.match(adminScript, /dataset\.media = product\.id/);
+  assert.match(adminScript, /uploadSelectedMedia/);
+  assert.match(adminScript, /moveMedia/);
+  assert.match(adminScript, /removeMedia/);
 });
 
 test('admin access is enforced by confirmed Supabase identity, backend role checks, and RLS', () => {

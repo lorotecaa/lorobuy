@@ -2,13 +2,14 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const state = {
   products: [], categories: [], users: [], usersLoaded: false,
-  editingId: null, deactivateId: null, editingUserId: null,
+  media: [], editingId: null, deactivateId: null, editingUserId: null, mediaProductId: null,
 };
 const productDialog = $('.product-dialog');
 const confirmDialog = $('.confirm-dialog');
 const form = $('.product-form');
 let userDialog;
 let userForm;
+let mediaDialog;
 
 const money = (cents, currency = 'USD') => new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -176,6 +177,57 @@ function initializeUsersInterface() {
   userForm.addEventListener('submit', saveUser);
 }
 
+function initializeMediaInterface() {
+  mediaDialog = createElement('dialog', { className: 'media-dialog' });
+  const shell = createElement('div');
+  const head = createElement('div', { className: 'modal-head' });
+  head.append(
+    createElement('div', { className: 'media-heading' }),
+    createElement('button', { className: 'close close-media', text: '×', type: 'button' }),
+  );
+  const body = createElement('div', { className: 'modal-body' });
+  const coverNote = createElement('div', { className: 'media-cover-note' });
+  coverNote.append(
+    createElement('img', { className: 'media-cover-image' }),
+    createElement('div', { className: 'media-cover-copy' }),
+  );
+  const upload = createElement('div', { className: 'media-upload' });
+  const fileInput = createElement('input', { className: 'media-files' });
+  fileInput.type = 'file'; fileInput.multiple = true;
+  fileInput.accept = 'image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime';
+  upload.append(
+    fileInput,
+    createElement('button', { className: 'primary upload-media', text: 'Subir contenido', type: 'button' }),
+  );
+  body.append(
+    coverNote,
+    upload,
+    createElement('p', { className: 'media-upload-status', text: 'Imágenes o videos de máximo 100 MB por archivo.' }),
+    createElement('div', { className: 'media-grid' }),
+  );
+  const foot = createElement('div', { className: 'modal-foot' });
+  foot.append(createElement('button', { className: 'secondary close-media', text: 'Cerrar', type: 'button' }));
+  shell.append(head, body, foot); mediaDialog.append(shell); document.body.append(mediaDialog);
+
+  $$('.close-media').forEach((button) => button.addEventListener('click', () => mediaDialog.close()));
+  $('.upload-media').addEventListener('click', uploadSelectedMedia);
+  $('.media-grid').addEventListener('click', async (event) => {
+    const save = event.target.closest('[data-save-media]');
+    const remove = event.target.closest('[data-remove-media]');
+    const move = event.target.closest('[data-move-media]');
+    if (save) await saveMedia(save.dataset.saveMedia);
+    if (move) await moveMedia(move.dataset.moveMedia, Number(move.dataset.direction));
+    if (remove && window.confirm('¿Quitar este contenido de la galería pública?')) {
+      await removeMedia(remove.dataset.removeMedia);
+    }
+  });
+  mediaDialog.addEventListener('close', () => {
+    $('.media-grid').replaceChildren();
+    state.media = [];
+    state.mediaProductId = null;
+  });
+}
+
 function show(view) {
   $$('.view').forEach((panel) => { panel.hidden = panel.dataset.panel !== view; });
   $$('[data-view]').forEach((link) => link.classList.toggle('active', link.dataset.view === view));
@@ -231,9 +283,11 @@ function renderProducts() {
     appendCell(row, statusBadge(product));
     appendCell(row, product.updatedAt ? new Date(product.updatedAt).toLocaleDateString('es-CO') : '—');
     const actions = createElement('div', { className: 'actions' });
+    const content = createElement('button', { className: 'small-button', text: 'Contenido', type: 'button' });
+    content.dataset.media = product.id;
     const edit = createElement('button', { className: 'small-button', text: 'Editar', type: 'button' });
     edit.dataset.edit = product.id;
-    actions.append(edit);
+    actions.append(content, edit);
     if (product.isActive) {
       const deactivate = createElement('button', { className: 'small-button remove', text: 'Desactivar', type: 'button' });
       deactivate.dataset.deactivate = product.id;
@@ -275,6 +329,150 @@ function renderPrices() {
     appendCell(row, save);
     body.append(row);
   }
+}
+
+function mediaPreview(item) {
+  const preview = item.type === 'video' ? createElement('video') : createElement('img');
+  preview.src = item.url;
+  preview.crossOrigin = 'anonymous';
+  if (item.type === 'video') {
+    preview.muted = true; preview.playsInline = true; preview.preload = 'metadata'; preview.controls = true;
+  } else preview.alt = item.altText || '';
+  return preview;
+}
+
+function renderMedia() {
+  const grid = $('.media-grid');
+  grid.replaceChildren();
+  if (!state.media.length) {
+    grid.append(createElement('div', {
+      className: 'media-empty',
+      text: 'Este producto todavía no tiene vistas adicionales. Su portada seguirá apareciendo en la tienda.',
+    }));
+    return;
+  }
+  state.media.forEach((item, index) => {
+    const card = createElement('article', { className: 'media-card' });
+    const frame = createElement('div', { className: 'media-frame' });
+    frame.append(mediaPreview(item), createElement('span', {
+      className: 'media-kind', text: item.type === 'video' ? 'Video' : 'Imagen',
+    }));
+    const field = createElement('label', { className: 'media-alt-field' });
+    field.append(createElement('span', { text: 'Texto descriptivo' }));
+    const alt = createElement('input');
+    alt.value = item.altText || ''; alt.maxLength = 180; alt.dataset.mediaAlt = item.id;
+    field.append(alt);
+    const actions = createElement('div', { className: 'media-actions' });
+    const up = createElement('button', { className: 'small-button', text: '↑', type: 'button' });
+    up.dataset.moveMedia = item.id; up.dataset.direction = '-1'; up.disabled = index === 0;
+    const down = createElement('button', { className: 'small-button', text: '↓', type: 'button' });
+    down.dataset.moveMedia = item.id; down.dataset.direction = '1'; down.disabled = index === state.media.length - 1;
+    const save = createElement('button', { className: 'small-button', text: 'Guardar', type: 'button' });
+    save.dataset.saveMedia = item.id;
+    const remove = createElement('button', { className: 'small-button remove', text: 'Quitar', type: 'button' });
+    remove.dataset.removeMedia = item.id;
+    actions.append(up, down, save, remove);
+    card.append(frame, field, actions); grid.append(card);
+  });
+}
+
+async function loadProductMedia() {
+  const data = await api(`/api/admin/products/${state.mediaProductId}/media`);
+  state.media = data.media;
+  $('.media-heading').replaceChildren(
+    createElement('h2', { text: `Contenido · ${data.product.name}` }),
+    createElement('p', { text: 'Ordena, describe, añade o retira las vistas de este producto.' }),
+  );
+  const cover = $('.media-cover-image');
+  cover.src = data.product.coverUrl; cover.alt = '';
+  $('.media-cover-copy').replaceChildren(
+    createElement('strong', { text: 'Portada principal' }),
+    createElement('small', { text: 'La portada se cambia desde el botón Editar del producto.' }),
+  );
+  renderMedia();
+}
+
+async function openMedia(product) {
+  if (!product) return;
+  state.mediaProductId = product.id;
+  $('.media-heading').replaceChildren(createElement('h2', { text: `Contenido · ${product.name}` }));
+  $('.media-grid').replaceChildren(createElement('div', { className: 'media-empty', text: 'Cargando contenido…' }));
+  $('.media-files').value = '';
+  $('.media-upload-status').textContent = 'Imágenes o videos de máximo 100 MB por archivo.';
+  mediaDialog.showModal();
+  try { await loadProductMedia(); }
+  catch (error) { $('.media-upload-status').textContent = error.message; }
+}
+
+async function uploadSelectedMedia() {
+  const input = $('.media-files');
+  const files = [...input.files];
+  const button = $('.upload-media');
+  const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/quicktime']);
+  if (!files.length) return toast('Selecciona al menos una imagen o video.', 'error');
+  if (files.some((file) => !allowed.has(file.type) || file.size <= 0 || file.size > 100 * 1024 * 1024)) {
+    return toast('Cada archivo debe ser una imagen o video válido de máximo 100 MB.', 'error');
+  }
+  try {
+    button.disabled = true; input.disabled = true;
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      $('.media-upload-status').textContent = `Subiendo ${index + 1} de ${files.length}: ${file.name}`;
+      const alt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
+      const response = await fetch(`/api/admin/products/${state.mediaProductId}/media`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': file.type, 'X-Media-Alt': encodeURIComponent(alt) },
+        credentials: 'same-origin',
+        body: file,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `No fue posible subir ${file.name}.`);
+    }
+    input.value = '';
+    await loadProductMedia();
+    $('.media-upload-status').textContent = 'Contenido subido y publicado en la galería.';
+    toast('La galería del producto ya está actualizada.');
+  } catch (error) {
+    $('.media-upload-status').textContent = error.message;
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false; input.disabled = false;
+  }
+}
+
+async function saveMedia(mediaId) {
+  const input = $(`[data-media-alt="${mediaId}"]`);
+  try {
+    await api(`/api/admin/products/${state.mediaProductId}/media/${mediaId}`, {
+      method: 'PATCH', body: JSON.stringify({ altText: input.value.trim() }),
+    });
+    await loadProductMedia();
+    toast('Descripción del contenido guardada.');
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function moveMedia(mediaId, direction) {
+  const currentIndex = state.media.findIndex((item) => item.id === mediaId);
+  const targetIndex = currentIndex + direction;
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= state.media.length) return;
+  const reordered = [...state.media];
+  [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+  try {
+    await Promise.all(reordered.map((item, index) => api(
+      `/api/admin/products/${state.mediaProductId}/media/${item.id}`,
+      { method: 'PATCH', body: JSON.stringify({ sortOrder: index * 10 }) },
+    )));
+    await loadProductMedia();
+    toast('Orden de la galería actualizado.');
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function removeMedia(mediaId) {
+  try {
+    await api(`/api/admin/products/${state.mediaProductId}/media/${mediaId}`, { method: 'DELETE' });
+    await loadProductMedia();
+    toast('Contenido retirado de la galería.');
+  } catch (error) { toast(error.message, 'error'); }
 }
 
 function renderUsers() {
@@ -457,8 +655,10 @@ form.addEventListener('submit', async (event) => {
 });
 
 $('.products-body').addEventListener('click', (event) => {
+  const media = event.target.closest('[data-media]');
   const edit = event.target.closest('[data-edit]');
   const deactivate = event.target.closest('[data-deactivate]');
+  if (media) openMedia(state.products.find((product) => product.id === media.dataset.media));
   if (edit) openProduct(state.products.find((product) => product.id === edit.dataset.edit));
   if (deactivate) {
     const product = state.products.find((item) => item.id === deactivate.dataset.deactivate);
@@ -508,6 +708,7 @@ $('.prices-body').addEventListener('click', async (event) => {
   }
 });
 
+initializeMediaInterface();
 initializeUsersInterface();
 $('.product-search').addEventListener('input', renderProducts);
 $('.price-search').addEventListener('input', renderPrices);

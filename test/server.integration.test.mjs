@@ -60,6 +60,19 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     sort_order: 20,
     is_active: true,
   };
+  const productMedia = {
+    id: '77777777-7777-4777-8777-777777777777',
+    product_id: product.id,
+    source_path: 'assets/hero.mp4',
+    storage_path: null,
+    media_type: 'video',
+    mime_type: 'video/mp4',
+    byte_size: null,
+    alt_text: 'Vista previa de Mock Product',
+    sort_order: 0,
+    is_active: true,
+    created_at: '2026-10-05T12:00:00.000Z',
+  };
   const adminUser = {
     id: '22222222-2222-4222-8222-222222222222',
     aud: 'authenticated',
@@ -215,6 +228,10 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify([category]));
     }
+    if (request.url?.startsWith('/rest/v1/product_media')) {
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify([productMedia]));
+    }
     if (request.url?.startsWith('/rest/v1/products')) {
       response.setHeader('Content-Range', '0-0/1');
       if (request.method === 'HEAD') return response.end();
@@ -280,6 +297,8 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.equal(productApi.product.slug, 'mock-product');
   assert.equal(productApi.product.previewPath, 'assets/hero.mp4');
   assert.equal(productApi.product.previewThumbnailPath, 'assets/genio.webp');
+  assert.equal(productApi.product.media.length, 1);
+  assert.equal(productApi.product.media[0].url, '/assets/hero.mp4');
 
   const productPageResponse = await fetch(`${appOrigin}/products/mock-product`);
   assert.equal(productPageResponse.status, 200);

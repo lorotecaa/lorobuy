@@ -11,7 +11,12 @@ function firstInlineTag(html, tagName) {
   return match[1];
 }
 
-export function buildContentSecurityPolicy(html, { allowSameOriginScripts = false } = {}) {
+export function buildContentSecurityPolicy(html, {
+  allowSameOriginScripts = false,
+  allowSameOriginStyles = false,
+  imageSources = [],
+  mediaSources = [],
+} = {}) {
   const styleHash = sha256(firstInlineTag(html, 'style'));
   const scriptHash = sha256(firstInlineTag(html, 'script'));
   const scriptPolicy = allowSameOriginScripts
@@ -22,11 +27,11 @@ export function buildContentSecurityPolicy(html, { allowSameOriginScripts = fals
     "default-src 'none'",
     scriptPolicy,
     "script-src-attr 'none'",
-    `style-src 'sha256-${styleHash}'`,
+    `style-src ${allowSameOriginStyles ? "'self' " : ''}'sha256-${styleHash}'`,
     "style-src-attr 'none'",
-    "img-src 'self' data:",
+    `img-src 'self' data: ${imageSources.join(' ')}`.trim(),
     "font-src 'self'",
-    "media-src 'self'",
+    `media-src 'self' ${mediaSources.join(' ')}`.trim(),
     "connect-src 'self'",
     "object-src 'none'",
     "base-uri 'none'",

@@ -36,11 +36,19 @@ const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
 const productHtml = fs.readFileSync(PRODUCT_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
-const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml);
-const productContentSecurityPolicy = buildContentSecurityPolicy(productHtml);
-const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml, { allowSameOriginScripts: true });
-const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
 const config = loadConfig();
+const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml);
+const productContentSecurityPolicy = buildContentSecurityPolicy(productHtml, {
+  imageSources: [config.supabaseUrl],
+  mediaSources: [config.supabaseUrl],
+});
+const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml, {
+  allowSameOriginScripts: true,
+  allowSameOriginStyles: true,
+  imageSources: [config.supabaseUrl],
+  mediaSources: [config.supabaseUrl],
+});
+const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
 const publicSupabase = createPublicSupabase(config);
 const adminSupabase = createAdminSupabase(config);
 const app = express();
@@ -143,13 +151,34 @@ app.use('/api', requireSameOrigin(config));
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const IMAGE_PATTERN = /^assets\/[a-z0-9-]+\.(?:webp|png|jpe?g)$/i;
+const LOCAL_MEDIA_PATTERN = /^assets\/(?:previews\/)?[a-z0-9-]+\.(?:mp4|webm|webp|png|jpe?g|gif)$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
 const PRIMARY_ADMIN_EMAIL = 'loroteca98@gmail.com';
+const MAX_PRODUCT_MEDIA_BYTES = 100 * 1024 * 1024;
+const PRODUCT_MEDIA_MIME_TYPES = new Map([
+  ['image/jpeg', { type: 'image', extension: 'jpg' }],
+  ['image/png', { type: 'image', extension: 'png' }],
+  ['image/webp', { type: 'image', extension: 'webp' }],
+  ['image/gif', { type: 'image', extension: 'gif' }],
+  ['video/mp4', { type: 'video', extension: 'mp4' }],
+  ['video/webm', { type: 'video', extension: 'webm' }],
+  ['video/quicktime', { type: 'video', extension: 'mov' }],
+]);
 
 function asyncRoute(handler) {
   return (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 }
+
+const adminOnly = asyncRoute(async (request, response, next) => {
+  const session = await requireAdmin(request, response, config);
+  if (!session) {
+    response.status(403).json({ error: 'Autorización administrativa requerida.' });
+    return;
+  }
+  request.adminSession = session;
+  next();
+});
 
 function isUuid(value) {
   return typeof value === 'string' && UUID_PATTERN.test(value);
@@ -194,7 +223,24 @@ function publicSignupError(error) {
   return { status: 400, message: 'No fue posible crear la cuenta.' };
 }
 
-function publicProduct(row) {
+function productMedia(row) {
+  const localPath = LOCAL_MEDIA_PATTERN.test(row.source_path ?? '') ? `/${row.source_path}` : null;
+  const publicUrl = row.storage_path
+    ? publicSupabase.storage.from('product-media').getPublicUrl(row.storage_path).data.publicUrl
+    : null;
+  return {
+    id: row.id,
+    type: row.media_type,
+    url: localPath ?? publicUrl,
+    altText: row.alt_text ?? '',
+    sortOrder: row.sort_order,
+    byteSize: row.byte_size ?? null,
+    mimeType: row.mime_type,
+    uploaded: Boolean(row.storage_path),
+  };
+}
+
+function publicProduct(row, mediaRows = []) {
   const previewCandidate = `assets/previews/${row.slug}.mp4`;
   const previewThumbnailCandidate = `assets/previews/${row.slug}-thumb.jpg`;
   const previewPath = SLUG_PATTERN.test(row.slug) && fs.existsSync(path.join(FRONTEND_BUILD_DIR, previewCandidate))
@@ -221,6 +267,7 @@ function publicProduct(row) {
       sortOrder: row.categories.sort_order,
     },
     sortOrder: row.sort_order,
+    media: mediaRows.map(productMedia).filter((item) => item.url),
   };
 }
 
@@ -282,7 +329,7 @@ app.get('/api/products', asyncRoute(async (_request, response) => {
 
   if (error) throw new Error('Unable to load products from Supabase.');
   response.set('Cache-Control', 'public, max-age=30, s-maxage=60');
-  return response.json({ products: (data ?? []).map(publicProduct) });
+  return response.json({ products: (data ?? []).map((row) => publicProduct(row)) });
 }));
 
 app.get('/api/products/:slug', asyncRoute(async (request, response) => {
@@ -299,8 +346,16 @@ app.get('/api/products/:slug', asyncRoute(async (request, response) => {
 
   if (error) throw new Error('Unable to load product from Supabase.');
   if (!data?.[0]) return response.status(404).json({ error: 'Producto no encontrado.' });
+  const { data: media, error: mediaError } = await publicSupabase
+    .from('product_media')
+    .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order')
+    .eq('product_id', data[0].id)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (mediaError) throw new Error('Unable to load product media from Supabase.');
   response.set('Cache-Control', 'public, max-age=30, s-maxage=60');
-  return response.json({ product: publicProduct(data[0]) });
+  return response.json({ product: publicProduct(data[0], media ?? []) });
 }));
 
 app.get('/api/auth/session', asyncRoute(async (request, response) => {
@@ -819,6 +874,168 @@ app.delete('/api/admin/products/:productId', asyncRoute(async (request, response
   return response.json({ product: adminProduct(data), deactivated: true });
 }));
 
+app.get('/api/admin/products/:productId/media', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.productId)) return response.status(400).json({ error: 'Producto no válido.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+
+  const [productResult, mediaResult] = await Promise.all([
+    session.client
+      .from('products')
+      .select('id,name,image_path')
+      .eq('id', request.params.productId)
+      .maybeSingle(),
+    session.client
+      .from('product_media')
+      .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,is_active,created_at')
+      .eq('product_id', request.params.productId)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+  ]);
+  if (productResult.error || !productResult.data) {
+    return response.status(404).json({ error: 'Producto no encontrado.' });
+  }
+  if (mediaResult.error) throw new Error('Unable to load product media from Supabase.');
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({
+    product: {
+      id: productResult.data.id,
+      name: productResult.data.name,
+      coverUrl: IMAGE_PATTERN.test(productResult.data.image_path)
+        ? `/${productResult.data.image_path}` : '/assets/favicon.png',
+    },
+    media: (mediaResult.data ?? []).map(productMedia),
+  });
+}));
+
+app.post(
+  '/api/admin/products/:productId/media',
+  adminOnly,
+  express.raw({ type: [...PRODUCT_MEDIA_MIME_TYPES.keys()], limit: MAX_PRODUCT_MEDIA_BYTES }),
+  asyncRoute(async (request, response) => {
+    if (!isUuid(request.params.productId)) return response.status(400).json({ error: 'Producto no válido.' });
+    const session = request.adminSession;
+    if (!adminSupabase) return response.status(503).json({ error: 'La carga de contenido no está configurada.' });
+
+    const mimeType = request.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+    const mediaDefinition = PRODUCT_MEDIA_MIME_TYPES.get(mimeType);
+    const body = Buffer.isBuffer(request.body) ? request.body : null;
+    if (!mediaDefinition || !body?.length || body.length > MAX_PRODUCT_MEDIA_BYTES) {
+      return response.status(400).json({ error: 'Selecciona una imagen o video válido de máximo 100 MB.' });
+    }
+
+    let altText = '';
+    try {
+      altText = normalizeText(decodeURIComponent(request.get('x-media-alt') ?? ''), 180);
+    } catch {
+      return response.status(400).json({ error: 'El texto alternativo no es válido.' });
+    }
+    if (altText === null) return response.status(400).json({ error: 'El texto alternativo no es válido.' });
+
+    const { data: product, error: productError } = await session.client
+      .from('products')
+      .select('id,name')
+      .eq('id', request.params.productId)
+      .maybeSingle();
+    if (productError || !product) return response.status(404).json({ error: 'Producto no encontrado.' });
+
+    const { data: latestMedia, error: latestError } = await session.client
+      .from('product_media')
+      .select('sort_order')
+      .eq('product_id', product.id)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: false })
+      .limit(1);
+    if (latestError) throw new Error('Unable to determine product media order.');
+    const sortOrder = Math.min(100_000, Number(latestMedia?.[0]?.sort_order ?? -10) + 10);
+    const storagePath = `${product.id}/${crypto.randomUUID()}.${mediaDefinition.extension}`;
+    const { error: uploadError } = await adminSupabase.storage
+      .from('product-media')
+      .upload(storagePath, body, {
+        contentType: mimeType,
+        cacheControl: '31536000',
+        upsert: false,
+      });
+    if (uploadError) return response.status(502).json({ error: 'No fue posible subir el archivo a Supabase.' });
+
+    const { data: created, error: insertError } = await session.client
+      .from('product_media')
+      .insert({
+        product_id: product.id,
+        storage_path: storagePath,
+        media_type: mediaDefinition.type,
+        mime_type: mimeType,
+        byte_size: body.length,
+        alt_text: altText || `Contenido de ${product.name}`,
+        sort_order: sortOrder,
+      })
+      .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,is_active,created_at')
+      .single();
+    if (insertError || !created) {
+      await adminSupabase.storage.from('product-media').remove([storagePath]);
+      return response.status(400).json({ error: 'No fue posible asociar el archivo al producto.' });
+    }
+    response.set('Cache-Control', 'private, no-store, max-age=0');
+    return response.status(201).json({ media: productMedia(created) });
+  }),
+);
+
+app.patch('/api/admin/products/:productId/media/:mediaId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.productId) || !isUuid(request.params.mediaId)) {
+    return response.status(400).json({ error: 'Contenido no válido.' });
+  }
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  const payload = {};
+  if (Object.hasOwn(request.body ?? {}, 'altText')) {
+    if (typeof request.body.altText !== 'string') return response.status(400).json({ error: 'El texto alternativo no es válido.' });
+    const altText = normalizeText(request.body.altText, 180);
+    if (altText === null) return response.status(400).json({ error: 'El texto alternativo no es válido.' });
+    payload.alt_text = altText || null;
+  }
+  if (Object.hasOwn(request.body ?? {}, 'sortOrder')) {
+    payload.sort_order = integerInRange(request.body.sortOrder, 0, 100_000);
+    if (payload.sort_order === null) return response.status(400).json({ error: 'El orden no es válido.' });
+  }
+  if (!Object.keys(payload).length) return response.status(400).json({ error: 'No hay cambios válidos.' });
+
+  const { data, error } = await session.client
+    .from('product_media')
+    .update(payload)
+    .eq('id', request.params.mediaId)
+    .eq('product_id', request.params.productId)
+    .eq('is_active', true)
+    .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,is_active,created_at')
+    .maybeSingle();
+  if (error || !data) return response.status(404).json({ error: 'Contenido no encontrado.' });
+  return response.json({ media: productMedia(data) });
+}));
+
+app.delete('/api/admin/products/:productId/media/:mediaId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.productId) || !isUuid(request.params.mediaId)) {
+    return response.status(400).json({ error: 'Contenido no válido.' });
+  }
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  const { data, error } = await session.client
+    .from('product_media')
+    .update({ is_active: false })
+    .eq('id', request.params.mediaId)
+    .eq('product_id', request.params.productId)
+    .eq('is_active', true)
+    .select('id,storage_path')
+    .maybeSingle();
+  if (error || !data) return response.status(404).json({ error: 'Contenido no encontrado.' });
+  if (data.storage_path && adminSupabase) {
+    const { error: storageError } = await adminSupabase.storage.from('product-media').remove([data.storage_path]);
+    if (storageError) {
+      console.warn(JSON.stringify({ level: 'warn', event: 'product_media_storage_cleanup_failed', mediaId: data.id }));
+    }
+  }
+  return response.json({ removed: true });
+}));
+
 async function readSupabaseAuthUsers() {
   if (!config.supabaseSecretKey) throw new Error('Supabase administrative access is not configured.');
   const users = [];
@@ -982,6 +1199,10 @@ app.use((error, request, response, _next) => {
     path: request.path,
   }));
   if (response.headersSent) return;
+  if (error?.type === 'entity.too.large') {
+    response.status(413).json({ error: 'El archivo supera el límite de 100 MB.' });
+    return;
+  }
   response.status(500).json({ error: 'El servicio no está disponible temporalmente.' });
 });
 

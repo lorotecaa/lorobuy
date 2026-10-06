@@ -239,7 +239,7 @@
     const make=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node};
     const money=(cents,currency)=>new Intl.NumberFormat('en-US',{style:'currency',currency}).format(cents/100);
     const safeImage=value=>/^assets\/[a-z0-9-]+\.(?:webp|png|jpe?g)$/i.test(value)?value:'assets/favicon.png';
-    const safeVideo=value=>/^assets\/[a-z0-9/-]+\.mp4(?:\?v=[a-z0-9-]+)?$/i.test(value)?value:'assets/hero.mp4?v=20261005-stream-1';
+    const safeVideo=value=>{const local=/^\/?assets\/[a-z0-9/-]+\.mp4(?:\?v=[a-z0-9-]+)?$/i.test(value||''),storage=/^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/product-media\/[a-z0-9/_-]+\.mp4(?:\?.*)?$/i.test(value||'');return local||storage?value:'assets/hero.mp4?v=20261005-stream-1'};
     function attachPreview(article,video,source){
       if(!matchMedia('(hover: hover)').matches||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
       const play=()=>{if(!video.src)video.src=source;video.play().then(()=>video.classList.add('is-playing')).catch(()=>{})};

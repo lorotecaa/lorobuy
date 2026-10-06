@@ -1,8 +1,12 @@
 import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import express from 'express';
+import ffmpegPath from 'ffmpeg-static';
 import helmet from 'helmet';
 import {
   clearSessionCookies,
@@ -37,7 +41,9 @@ const productHtml = fs.readFileSync(PRODUCT_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
 const config = loadConfig();
-const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml);
+const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml, {
+  mediaSources: [config.supabaseUrl],
+});
 const productContentSecurityPolicy = buildContentSecurityPolicy(productHtml, {
   imageSources: [config.supabaseUrl],
   mediaSources: [config.supabaseUrl],
@@ -157,6 +163,7 @@ const MIN_PASSWORD_LENGTH = 6;
 const PRIMARY_ADMIN_EMAIL = 'loroteca98@gmail.com';
 const MEDIA_ASSET_VERSION = '20261005-stream-1';
 const MAX_PRODUCT_MEDIA_BYTES = 100 * 1024 * 1024;
+const MAX_OPTIMIZED_VIDEO_BYTES = 30 * 1024 * 1024;
 const PRODUCT_MEDIA_MIME_TYPES = new Map([
   ['image/jpeg', { type: 'image', extension: 'jpg' }],
   ['image/png', { type: 'image', extension: 'png' }],
@@ -243,6 +250,59 @@ function productMedia(row) {
   };
 }
 
+function runFfmpeg(argumentsList) {
+  return new Promise((resolve, reject) => {
+    if (!ffmpegPath) return reject(new Error('FFmpeg is unavailable.'));
+    const process = spawn(ffmpegPath, argumentsList, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    let diagnostics = '';
+    const timeout = setTimeout(() => {
+      process.kill('SIGKILL');
+      reject(new Error('Video optimization timed out.'));
+    }, 180_000);
+    process.stderr.on('data', (chunk) => {
+      diagnostics = `${diagnostics}${chunk}`.slice(-4_000);
+    });
+    process.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    process.once('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) resolve();
+      else reject(new Error(`FFmpeg exited with code ${code}: ${diagnostics}`));
+    });
+  });
+}
+
+async function optimizeUploadedVideo(body, extension) {
+  const temporaryDirectory = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'lorobuy-media-'));
+  const inputPath = path.join(temporaryDirectory, `input.${extension}`);
+  const outputPath = path.join(temporaryDirectory, 'optimized.mp4');
+  try {
+    await fsPromises.writeFile(inputPath, body, { flag: 'wx' });
+    await runFfmpeg([
+      '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+      '-i', inputPath,
+      '-map', '0:v:0', '-map', '0:a?',
+      '-vf', "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease",
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21',
+      '-maxrate', '2800k', '-bufsize', '5600k',
+      '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '96k',
+      '-movflags', '+faststart',
+      outputPath,
+    ]);
+    const optimized = await fsPromises.readFile(outputPath);
+    if (!optimized.length || optimized.length > MAX_OPTIMIZED_VIDEO_BYTES) {
+      throw new Error('Optimized video exceeds the storefront delivery limit.');
+    }
+    return optimized;
+  } finally {
+    await fsPromises.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
 function publicProduct(row, mediaRows = []) {
   const previewCandidate = `assets/previews/${row.slug}.mp4`;
   const previewThumbnailCandidate = `assets/previews/${row.slug}-thumb.jpg`;
@@ -253,13 +313,15 @@ function publicProduct(row, mediaRows = []) {
   const previewThumbnailPath = SLUG_PATTERN.test(row.slug) && fs.existsSync(path.join(FRONTEND_BUILD_DIR, previewThumbnailCandidate))
     ? previewThumbnailCandidate
     : imagePath;
+  const media = mediaRows.map(productMedia).filter((item) => item.url);
+  const primaryVideo = media.find((item) => item.type === 'video');
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
     description: row.description,
     imagePath,
-    previewPath: `${previewPath}?v=${MEDIA_ASSET_VERSION}`,
+    previewPath: primaryVideo?.url ?? `${previewPath}?v=${MEDIA_ASSET_VERSION}`,
     previewThumbnailPath,
     priceCents: row.price_cents,
     compareAtPriceCents: row.compare_at_price_cents,
@@ -270,7 +332,7 @@ function publicProduct(row, mediaRows = []) {
       sortOrder: row.categories.sort_order,
     },
     sortOrder: row.sort_order,
-    media: mediaRows.map(productMedia).filter((item) => item.url),
+    media,
   };
 }
 
@@ -331,8 +393,31 @@ app.get('/api/products', asyncRoute(async (_request, response) => {
     .order('sort_order', { ascending: true });
 
   if (error) throw new Error('Unable to load products from Supabase.');
+  const products = data ?? [];
+  const mediaByProduct = new Map();
+  const productIds = products.map((product) => product.id);
+
+  if (productIds.length > 0) {
+    const { data: mediaRows, error: mediaError } = await publicSupabase
+      .from('product_media')
+      .select('id,product_id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,created_at')
+      .in('product_id', productIds)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true });
+
+    if (mediaError) throw new Error('Unable to load product media from Supabase.');
+    for (const mediaRow of mediaRows ?? []) {
+      const productMedia = mediaByProduct.get(mediaRow.product_id) ?? [];
+      productMedia.push(mediaRow);
+      mediaByProduct.set(mediaRow.product_id, productMedia);
+    }
+  }
+
   response.set('Cache-Control', 'public, max-age=30, s-maxage=60');
-  return response.json({ products: (data ?? []).map((row) => publicProduct(row)) });
+  return response.json({
+    products: products.map((row) => publicProduct(row, mediaByProduct.get(row.id) ?? [])),
+  });
 }));
 
 app.get('/api/products/:slug', asyncRoute(async (request, response) => {
@@ -928,6 +1013,26 @@ app.post(
       return response.status(400).json({ error: 'Selecciona una imagen o video válido de máximo 100 MB.' });
     }
 
+    let storedBody = body;
+    let storedMimeType = mimeType;
+    let storedDefinition = mediaDefinition;
+    if (mediaDefinition.type === 'video') {
+      try {
+        storedBody = await optimizeUploadedVideo(body, mediaDefinition.extension);
+        storedMimeType = 'video/mp4';
+        storedDefinition = PRODUCT_MEDIA_MIME_TYPES.get(storedMimeType);
+      } catch (error) {
+        console.warn(JSON.stringify({
+          level: 'warn',
+          event: 'product_media_video_optimization_failed',
+          message: error?.message ?? 'Unknown optimization error',
+        }));
+        return response.status(400).json({
+          error: 'No fue posible optimizar el video. Usa un archivo MP4, WebM o MOV válido de hasta 100 MB y duración moderada.',
+        });
+      }
+    }
+
     let altText = '';
     try {
       altText = normalizeText(decodeURIComponent(request.get('x-media-alt') ?? ''), 180);
@@ -952,11 +1057,11 @@ app.post(
       .limit(1);
     if (latestError) throw new Error('Unable to determine product media order.');
     const sortOrder = Math.min(100_000, Number(latestMedia?.[0]?.sort_order ?? -10) + 10);
-    const storagePath = `${product.id}/${crypto.randomUUID()}.${mediaDefinition.extension}`;
+    const storagePath = `${product.id}/${crypto.randomUUID()}.${storedDefinition.extension}`;
     const { error: uploadError } = await adminSupabase.storage
       .from('product-media')
-      .upload(storagePath, body, {
-        contentType: mimeType,
+      .upload(storagePath, storedBody, {
+        contentType: storedMimeType,
         cacheControl: '31536000',
         upsert: false,
       });
@@ -967,9 +1072,9 @@ app.post(
       .insert({
         product_id: product.id,
         storage_path: storagePath,
-        media_type: mediaDefinition.type,
-        mime_type: mimeType,
-        byte_size: body.length,
+        media_type: storedDefinition.type,
+        mime_type: storedMimeType,
+        byte_size: storedBody.length,
         alt_text: altText || `Contenido de ${product.name}`,
         sort_order: sortOrder,
       })
@@ -980,7 +1085,10 @@ app.post(
       return response.status(400).json({ error: 'No fue posible asociar el archivo al producto.' });
     }
     response.set('Cache-Control', 'private, no-store, max-age=0');
-    return response.status(201).json({ media: productMedia(created) });
+    return response.status(201).json({
+      media: productMedia(created),
+      optimized: mediaDefinition.type === 'video',
+    });
   }),
 );
 
@@ -1031,9 +1139,19 @@ app.delete('/api/admin/products/:productId/media/:mediaId', asyncRoute(async (re
     .maybeSingle();
   if (error || !data) return response.status(404).json({ error: 'Contenido no encontrado.' });
   if (data.storage_path && adminSupabase) {
-    const { error: storageError } = await adminSupabase.storage.from('product-media').remove([data.storage_path]);
-    if (storageError) {
-      console.warn(JSON.stringify({ level: 'warn', event: 'product_media_storage_cleanup_failed', mediaId: data.id }));
+    const { data: remainingReferences, error: referenceError } = await adminSupabase
+      .from('product_media')
+      .select('id')
+      .eq('storage_path', data.storage_path)
+      .eq('is_active', true)
+      .limit(1);
+    if (referenceError) {
+      console.warn(JSON.stringify({ level: 'warn', event: 'product_media_reference_check_failed', mediaId: data.id }));
+    } else if (!remainingReferences?.length) {
+      const { error: storageError } = await adminSupabase.storage.from('product-media').remove([data.storage_path]);
+      if (storageError) {
+        console.warn(JSON.stringify({ level: 'warn', event: 'product_media_storage_cleanup_failed', mediaId: data.id }));
+      }
     }
   }
   return response.json({ removed: true });

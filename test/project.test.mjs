@@ -42,6 +42,7 @@ const catalogPaymentMapping = fs.readFileSync(path.join(root, 'supabase', 'migra
 const adminCatalogMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040002_admin_products_prices.sql'), 'utf8');
 const adminUsersMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610040003_admin_users.sql'), 'utf8');
 const productMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610050001_product_media_gallery.sql'), 'utf8');
+const sharedMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060001_shared_product_media.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -275,6 +276,13 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(productMediaMigration, /create policy product_media_admin_all/);
   assert.match(productMediaMigration, /'product-media'/);
   assert.match(productMediaMigration, /file_size_limit = excluded\.file_size_limit/);
+  assert.match(sharedMediaMigration, /drop constraint if exists product_media_storage_path_key/);
+  assert.match(sharedMediaMigration, /product_media_storage_path_idx/);
+  assert.equal(packageJson.dependencies['ffmpeg-static'], '^5.3.0');
+  assert.match(server, /optimizeUploadedVideo/);
+  assert.match(server, /'-movflags', '\+faststart'/);
+  assert.match(server, /MAX_OPTIMIZED_VIDEO_BYTES/);
+  assert.match(server, /product_media_reference_check_failed/);
   assert.match(server, /app\.get\('\/api\/admin\/products\/:productId\/media'/);
   assert.match(server, /app\.post\(\s*'\/api\/admin\/products\/:productId\/media'/);
   assert.match(server, /app\.patch\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);

@@ -1226,7 +1226,7 @@ begin;
 create table public.product_media (
   id uuid primary key default gen_random_uuid(),
   product_id uuid not null references public.products(id) on delete cascade,
-  storage_path text unique check (storage_path is null or char_length(storage_path) between 1 and 500),
+  storage_path text check (storage_path is null or char_length(storage_path) between 1 and 500),
   source_path text check (
     source_path is null
     or source_path ~ '^assets/(previews/)?[a-z0-9-]+\.(mp4|webm|webp|png|jpg|jpeg|gif)$'
@@ -1245,6 +1245,10 @@ create table public.product_media (
 
 create index product_media_product_active_order_idx
 on public.product_media (product_id, is_active, sort_order, created_at);
+
+create index product_media_storage_path_idx
+on public.product_media (storage_path)
+where storage_path is not null;
 
 create trigger product_media_set_updated_at before update on public.product_media
 for each row execute function public.set_updated_at();

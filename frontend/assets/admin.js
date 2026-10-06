@@ -415,7 +415,7 @@ async function openMedia(product) {
   $('.media-heading').replaceChildren(createElement('h2', { text: `Contenido · ${product.name}` }));
   $('.media-grid').replaceChildren(createElement('div', { className: 'media-empty', text: 'Cargando contenido…' }));
   $('.media-files').value = '';
-  $('.media-upload-status').textContent = 'Imágenes o videos de máximo 100 MB por archivo.';
+  $('.media-upload-status').textContent = 'Imágenes o videos de máximo 100 MB. Los videos se optimizan automáticamente para reproducción rápida.';
   mediaDialog.showModal();
   try { await loadProductMedia(); }
   catch (error) { $('.media-upload-status').textContent = error.message; }
@@ -434,7 +434,9 @@ async function uploadSelectedMedia() {
     button.disabled = true; input.disabled = true;
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
-      $('.media-upload-status').textContent = `Subiendo ${index + 1} de ${files.length}: ${file.name}`;
+      $('.media-upload-status').textContent = file.type.startsWith('video/')
+        ? `Subiendo y optimizando ${index + 1} de ${files.length}: ${file.name}. Puede tardar unos minutos.`
+        : `Subiendo ${index + 1} de ${files.length}: ${file.name}`;
       const alt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
       const response = await fetch(`/api/admin/products/${state.mediaProductId}/media`, {
         method: 'POST',
@@ -447,7 +449,7 @@ async function uploadSelectedMedia() {
     }
     input.value = '';
     await loadProductMedia();
-    $('.media-upload-status').textContent = 'Contenido subido y publicado en la galería.';
+    $('.media-upload-status').textContent = 'Contenido optimizado, subido a Supabase y publicado en la galería.';
     toast('La galería del producto ya está actualizada.');
   } catch (error) {
     $('.media-upload-status').textContent = error.message;

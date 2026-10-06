@@ -298,7 +298,7 @@ test('admin products and prices use the existing catalog with an atomic Lemon ma
   assert.match(adminCatalogMigration, /insert into public\.payment_provider_variants/);
   assert.match(adminHtml, /data-panel="products"/);
   assert.match(adminHtml, /data-panel="prices"/);
-  assert.match(adminHtml, /src="\/assets\/admin\.js"/);
+  assert.match(adminHtml, /src="\/assets\/admin\.js(?:\?[^\"]+)?"/);
   assert.doesNotMatch(adminScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
   assert.doesNotMatch(`${adminHtml}\n${adminScript}`, /SUPABASE_SECRET_KEY|service_role|sb_secret_/);
 });

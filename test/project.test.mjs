@@ -21,11 +21,14 @@ import {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
 const productHtml = fs.readFileSync(path.join(root, 'frontend', 'product.html'), 'utf8');
+const packsCollectionHtml = fs.readFileSync(path.join(root, 'frontend', 'collection-packs.html'), 'utf8');
+const packsCollectionScript = fs.readFileSync(path.join(root, 'frontend', 'assets', 'collection-packs.js'), 'utf8');
 const adminHtml = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
 const adminScript = fs.readFileSync(path.join(root, 'frontend', 'assets', 'admin.js'), 'utf8');
 const authConfirmHtml = fs.readFileSync(path.join(root, 'frontend', 'auth-confirm.html'), 'utf8');
 const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
 const builtProductHtml = fs.readFileSync(path.join(root, 'dist', 'product.html'), 'utf8');
+const builtPacksCollectionHtml = fs.readFileSync(path.join(root, 'dist', 'collection-packs.html'), 'utf8');
 const builtAdminHtml = fs.readFileSync(path.join(root, 'dist', 'admin.html'), 'utf8');
 const builtAuthConfirmHtml = fs.readFileSync(path.join(root, 'dist', 'auth-confirm.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
@@ -199,6 +202,22 @@ test('catalog cards preview video on hover and open a dedicated product page', (
   assert.match(server, /app\.get\('\/products\/:slug'/);
 });
 
+test('packs CTA opens a complete Supabase-backed collection page', () => {
+  assert.match(html, /href="\/collections\/packs-completos">Ver packs completos<\/a>/i);
+  assert.match(html, /class="view-all" href="\/collections\/packs-completos"/);
+  assert.match(server, /app\.get\('\/collections\/packs-completos'/);
+  assert.match(packsCollectionHtml, /id="productos"/);
+  assert.match(packsCollectionHtml, /data-filter="mega"/);
+  assert.match(packsCollectionHtml, /data-filter="battle"/);
+  assert.match(packsCollectionHtml, /id="collectionSort"/);
+  assert.match(packsCollectionScript, /fetch\('\/api\/products'/);
+  assert.match(packsCollectionScript, /product\.category\?\.slug === 'packs-completos'/);
+  assert.match(packsCollectionScript, /fetch\('\/api\/cart\/items'/);
+  assert.match(packsCollectionScript, /method: 'DELETE'/);
+  assert.match(packsCollectionScript, /fetch\('\/api\/checkout'/);
+  assert.doesNotMatch(packsCollectionScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
+});
+
 test('hero battle animates donations, time, progress, and round result', () => {
   assert.match(html, /id="battleLeftScore"/);
   assert.match(html, /id="battleRightScore"/);
@@ -236,6 +255,7 @@ test('Render build and start commands produce the directory used by the server',
   assert.match(server, /path\.join\(ROOT_DIR, 'dist'\)/);
   assert.equal(builtHtml, html);
   assert.equal(builtProductHtml, productHtml);
+  assert.equal(builtPacksCollectionHtml, packsCollectionHtml);
   assert.equal(builtAdminHtml, adminHtml);
   assert.equal(builtAuthConfirmHtml, authConfirmHtml);
 });
@@ -250,7 +270,7 @@ test('email confirmation uses the configured public origin and a protected callb
 
 test('payment secrets stay on the backend and never enter storefront code', () => {
   const backendSource = `${server}\n${configSource}\n${paymentsSource}`;
-  const browserSource = `${html}\n${productHtml}\n${adminHtml}\n${adminScript}\n${authConfirmHtml}`;
+  const browserSource = `${html}\n${productHtml}\n${packsCollectionHtml}\n${packsCollectionScript}\n${adminHtml}\n${adminScript}\n${authConfirmHtml}`;
   assert.match(backendSource, /SUPABASE_PUBLISHABLE_KEY/);
   assert.match(backendSource, /SUPABASE_SECRET_KEY/);
   assert.match(backendSource, /LEMON_SQUEEZY_API_KEY/);
@@ -381,7 +401,7 @@ test('admin orders expose payment history and tightly scoped unpaid-order action
 });
 
 test('all referenced local assets exist', () => {
-  const references = [...`${html}\n${productHtml}\n${adminHtml}`.matchAll(/(?:src|href)="\/?(assets\/[^"]+)"/g)].map((match) => match[1]);
+  const references = [...`${html}\n${productHtml}\n${packsCollectionHtml}\n${adminHtml}`.matchAll(/(?:src|href)="\/?(assets\/[^"]+)"/g)].map((match) => match[1]);
   for (const reference of references) {
     const assetPath = reference.split(/[?#]/, 1)[0];
     assert.equal(fs.existsSync(path.join(root, 'frontend', assetPath)), true, reference);

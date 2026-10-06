@@ -405,6 +405,12 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.match(await productPageResponse.text(), /Detalle del producto LoroBuy/);
   assert.match(productPageResponse.headers.get('content-security-policy') ?? '', /connect-src 'self'/);
 
+  const packsCollectionResponse = await fetch(`${appOrigin}/collections/packs-completos`);
+  assert.equal(packsCollectionResponse.status, 200);
+  assert.match(await packsCollectionResponse.text(), /Packs completos para TikTok LIVE \| LoroBuy/);
+  assert.match(packsCollectionResponse.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+  assert.equal(packsCollectionResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+
   const invalidProductPageResponse = await fetch(`${appOrigin}/products/INVALID!`);
   assert.equal(invalidProductPageResponse.status, 404);
 

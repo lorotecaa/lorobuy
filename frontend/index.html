@@ -100,7 +100,7 @@
     .sale{position:absolute;z-index:2;left:10px;bottom:8px;padding:3px 12px;border-radius:999px;background:var(--purple);font-size:12px;font-weight:700}
     .product-info{padding:18px 18px 19px;display:flex;flex:1;flex-direction:column}.product h3{font-size:15px;line-height:1.02;min-height:46px;margin:0 0 11px;letter-spacing:-.02em}.product-name{color:inherit;text-decoration:none}.product-name:hover{color:var(--green)}.old{display:block;color:#9d9ba6;font-size:13px;text-decoration:line-through}.price{font-size:15px;margin:1px 0 17px}.add{position:relative;z-index:3;margin-top:auto;width:100%;min-height:47px;border:2px solid var(--green);border-radius:10px;background:transparent;color:var(--green);font-family:ImpactSans,sans-serif;font-size:13px;text-transform:uppercase;cursor:pointer}.add:hover,.add.added{background:var(--green);color:#09090e}
     @media(hover:none),(prefers-reduced-motion:reduce){.card-preview{display:none}.product:hover .poster img{transform:none}}
-    .center{display:flex;justify-content:center;margin-top:22px}.view-all{min-height:46px;padding:0 30px;border:0;border-radius:9px;background:var(--green);color:#08080d;cursor:pointer}
+    .center{display:flex;justify-content:center;margin-top:22px}.view-all{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 30px;border:0;border-radius:9px;background:var(--green);color:#08080d;text-decoration:none;cursor:pointer}
     .energy{padding-top:38px;padding-bottom:100px}.energy-head{text-align:center}.energy-title{font-size:clamp(29px,4vw,43px);margin:0}.energy-title span{color:var(--green)}.energy-head p{color:var(--muted)}
     .bento{display:grid;grid-template-columns:1.25fr 1fr 1fr;grid-template-rows:245px 230px;gap:18px;margin-top:32px}
     .metric{position:relative;border:1px solid var(--border);border-radius:20px;overflow:hidden;padding:22px;background:linear-gradient(155deg,#211948,#121019 62%)}
@@ -131,7 +131,7 @@
       <button class="menu-btn" aria-label="Abrir menú" aria-expanded="false">☰</button>
       <a class="brand-logo" href="#inicio" aria-label="Lorobuy">Loro<span>buy</span></a>
       <nav class="navlinks" aria-label="Navegación principal">
-        <a class="primary" href="#packs">Packs completos</a><a href="#animaciones">Animaciones⌄</a><a href="#facil">Tutorial</a><a href="#catalogo">Catálogo</a><a href="#contacto">Contacto</a>
+        <a class="primary" href="/collections/packs-completos">Packs completos</a><a href="#animaciones">Animaciones⌄</a><a href="#facil">Tutorial</a><a href="#catalogo">Catálogo</a><a href="#contacto">Contacto</a>
       </nav>
       <div class="tools">
         <button class="icon-btn" aria-label="Buscar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
@@ -151,19 +151,19 @@
           </div>
           <div class="bar" id="battleBar" role="progressbar" aria-label="Ventaja de Con Lorobuy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="battle-result" id="battleResult">Victoria</span></div>
         </div>
-        <div class="cta-row"><a class="btn green" href="#packs">Ver packs completos</a><a class="btn outline" href="#catalogo">Ver todo el catálogo</a></div><p class="note">Listas para TikTok LIVE Studio y OBS. Fondo transparente.</p>
+        <div class="cta-row"><a class="btn green" href="/collections/packs-completos">Ver packs completos</a><a class="btn outline" href="#catalogo">Ver todo el catálogo</a></div><p class="note">Listas para TikTok LIVE Studio y OBS. Fondo transparente.</p>
       </div>
       <div class="phone-wrap reveal"><div class="phone"><video src="assets/hero.mp4?v=20261005-stream-1" autoplay muted loop playsinline preload="metadata" poster="assets/genio.webp" disablepictureinpicture></video><span class="live-tag">LIVE</span></div></div>
     </div></section>
 
     <section class="section" id="animaciones"><div class="shell"><div class="head-row reveal"><h2 class="section-title">Elige tu animación</h2><p>Encuentra el efecto para cada momento de tu live.</p></div><div class="category-grid">
-      <a class="category reveal" href="#packs"><span class="cat-icon">⚡</span><span class="cat-copy"><b>Packs<br>completos</b><small>20 packs</small></span></a>
+      <a class="category reveal" href="/collections/packs-completos"><span class="cat-icon">⚡</span><span class="cat-copy"><b>Packs<br>completos</b><small>Ver colección</small></span></a>
       <a class="category reveal" href="#quiereme"><span class="cat-icon">💗</span><span class="cat-copy"><b>Quiéreme</b><small>32 animaciones</small></span></a>
       <a class="category reveal" href="#energia"><span class="cat-icon">⬆️</span><span class="cat-copy"><b>Level up</b><small>1 animación</small></span></a>
       <a class="category reveal" href="#snipe"><span class="cat-icon">🎯</span><span class="cat-copy"><b>Snipe y<br>galería</b><small>4 animaciones</small></span></a>
     </div></div></section>
 
-    <section class="section" id="packs"><div class="shell"><h2 class="section-title reveal">Packs completos</h2><div class="products" id="packGrid"></div><div class="center"><button class="view-all">Ver todo</button></div></div></section>
+    <section class="section" id="packs"><div class="shell"><h2 class="section-title reveal">Packs completos</h2><div class="products" id="packGrid"></div><div class="center"><a class="view-all" href="/collections/packs-completos">Ver todo</a></div></div></section>
 
     <section class="energy" id="energia"><div class="shell"><div class="energy-head reveal"><h2 class="energy-title">Dale más energía a tu <span>LIVE</span></h2><p>Animaciones que le dan más emoción a tus batallas, regalos e interacciones.</p></div><div class="bento">
       <article class="metric tall reveal"><div class="diamond"><span class="gem">♦</span><span><b class="big-number" data-count="24580">0</b><small style="display:block;color:#aaa7b7">Diamantes en el live</small></span></div><h3 style="margin-top:28px">Más momentos para celebrar</h3><p>Cada regalo se vuelve un momento épico que tu audiencia quiere repetir.</p><div class="chart"></div></article>
@@ -187,7 +187,7 @@
       <details><summary>¿Puedo pedir una devolución o reembolso?</summary><div class="answer">Al tratarse de productos digitales, las condiciones dependen de si el archivo ya fue descargado. Revisa la política antes de comprar.</div></details>
     </div></section>
 
-    <section class="mega-cta"><div class="shell"><h2>Convierte cada regalo en un momento épico</h2><a class="btn" href="#packs">Ver catálogo completo</a></div></section>
+    <section class="mega-cta"><div class="shell"><h2>Convierte cada regalo en un momento épico</h2><a class="btn" href="/collections/packs-completos">Ver catálogo completo</a></div></section>
   </main>
   <footer id="contacto"><div class="shell"><div class="newsletter"><h2>Suscríbete para recibir anuncios</h2><p>Sé el primero en saber sobre nuevas colecciones y ofertas exclusivas.</p><form class="email-form" action="#" method="post" data-newsletter-form><input type="email" required maxlength="254" autocomplete="email" inputmode="email" spellcheck="false" placeholder="Correo electrónico" aria-label="Correo electrónico"><button type="submit" aria-label="Suscribirse">→</button></form></div><a class="social" href="#" aria-label="TikTok">♪</a><div class="payments"><span class="pay">AMEX</span><span class="pay">DIN</span><span class="pay">●●</span><span class="pay">VISA</span></div><div class="copyright">© 2026, Lorobuy · Política de privacidad</div></div></footer>
   <div class="toast" role="status"><b>✓</b> Agregado al carrito</div>

@@ -31,13 +31,15 @@ const FRONTEND_BUILD_DIR = path.join(ROOT_DIR, 'dist');
 const ASSET_DIR = path.join(FRONTEND_BUILD_DIR, 'assets');
 const INDEX_FILE = path.join(FRONTEND_BUILD_DIR, 'index.html');
 const PRODUCT_FILE = path.join(FRONTEND_BUILD_DIR, 'product.html');
+const PACKS_COLLECTION_FILE = path.join(FRONTEND_BUILD_DIR, 'collection-packs.html');
 const ADMIN_FILE = path.join(FRONTEND_BUILD_DIR, 'admin.html');
 const AUTH_CONFIRM_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-confirm.html');
-if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(ASSET_DIR)) {
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(PACKS_COLLECTION_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(ASSET_DIR)) {
   throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
 }
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
 const productHtml = fs.readFileSync(PRODUCT_FILE, 'utf8');
+const packsCollectionHtml = fs.readFileSync(PACKS_COLLECTION_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
 const config = loadConfig();
@@ -45,6 +47,12 @@ const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml, {
   mediaSources: [config.supabaseUrl],
 });
 const productContentSecurityPolicy = buildContentSecurityPolicy(productHtml, {
+  imageSources: [config.supabaseUrl],
+  mediaSources: [config.supabaseUrl],
+});
+const packsCollectionContentSecurityPolicy = buildContentSecurityPolicy(packsCollectionHtml, {
+  allowSameOriginScripts: true,
+  allowSameOriginStyles: true,
   imageSources: [config.supabaseUrl],
   mediaSources: [config.supabaseUrl],
 });
@@ -75,9 +83,11 @@ app.use((request, response, next) => {
     ? adminContentSecurityPolicy
     : request.path === '/auth/confirm'
       ? authConfirmContentSecurityPolicy
-      : request.path.startsWith('/products/')
-        ? productContentSecurityPolicy
-        : contentSecurityPolicy;
+      : request.path === '/collections/packs-completos'
+        ? packsCollectionContentSecurityPolicy
+        : request.path.startsWith('/products/')
+          ? productContentSecurityPolicy
+          : contentSecurityPolicy;
   response.set({
     'Content-Security-Policy': pageContentSecurityPolicy,
     'Permissions-Policy': 'accelerometer=(), autoplay=(self), browsing-topics=(), camera=(), clipboard-read=(), clipboard-write=(), fullscreen=(self), gamepad=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), publickey-credentials-create=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), xr-spatial-tracking=()',
@@ -1510,6 +1520,14 @@ app.use('/assets', express.static(ASSET_DIR, {
 app.get(['/', '/index.html'], (_request, response) => {
   response.set('Cache-Control', 'private, no-store, max-age=0');
   response.type('html').send(storefrontHtml);
+});
+
+app.get('/collections/packs-completos', (_request, response) => {
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': packsCollectionContentSecurityPolicy,
+  });
+  return response.type('html').send(packsCollectionHtml);
 });
 
 app.get('/products/:slug', (request, response) => {

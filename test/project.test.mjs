@@ -267,6 +267,9 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(server, /app\.patch\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
   assert.match(server, /app\.delete\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
   assert.match(adminScript, /dataset\.media = product\.id/);
+  assert.match(adminScript, /state\.mediaCover = \{/);
+  assert.match(adminScript, /Imagen · portada/);
+  assert.match(adminScript, /image\/jpeg,image\/png,image\/webp,image\/gif/);
   assert.match(adminScript, /uploadSelectedMedia/);
   assert.match(adminScript, /moveMedia/);
   assert.match(adminScript, /removeMedia/);

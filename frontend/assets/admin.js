@@ -2,7 +2,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const state = {
   products: [], categories: [], users: [], usersLoaded: false,
-  media: [], editingId: null, deactivateId: null, editingUserId: null, mediaProductId: null,
+  media: [], mediaCover: null, editingId: null, deactivateId: null, editingUserId: null, mediaProductId: null,
 };
 const productDialog = $('.product-dialog');
 const confirmDialog = $('.confirm-dialog');
@@ -186,11 +186,6 @@ function initializeMediaInterface() {
     createElement('button', { className: 'close close-media', text: '×', type: 'button' }),
   );
   const body = createElement('div', { className: 'modal-body' });
-  const coverNote = createElement('div', { className: 'media-cover-note' });
-  coverNote.append(
-    createElement('img', { className: 'media-cover-image' }),
-    createElement('div', { className: 'media-cover-copy' }),
-  );
   const upload = createElement('div', { className: 'media-upload' });
   const fileInput = createElement('input', { className: 'media-files' });
   fileInput.type = 'file'; fileInput.multiple = true;
@@ -200,7 +195,6 @@ function initializeMediaInterface() {
     createElement('button', { className: 'primary upload-media', text: 'Subir contenido', type: 'button' }),
   );
   body.append(
-    coverNote,
     upload,
     createElement('p', { className: 'media-upload-status', text: 'Imágenes o videos de máximo 100 MB por archivo.' }),
     createElement('div', { className: 'media-grid' }),
@@ -215,6 +209,13 @@ function initializeMediaInterface() {
     const save = event.target.closest('[data-save-media]');
     const remove = event.target.closest('[data-remove-media]');
     const move = event.target.closest('[data-move-media]');
+    const editCover = event.target.closest('[data-edit-cover]');
+    if (editCover) {
+      const product = state.products.find((entry) => entry.id === state.mediaProductId);
+      mediaDialog.close();
+      openProduct(product);
+      return;
+    }
     if (save) await saveMedia(save.dataset.saveMedia);
     if (move) await moveMedia(move.dataset.moveMedia, Number(move.dataset.direction));
     if (remove && window.confirm('¿Quitar este contenido de la galería pública?')) {
@@ -224,6 +225,7 @@ function initializeMediaInterface() {
   mediaDialog.addEventListener('close', () => {
     $('.media-grid').replaceChildren();
     state.media = [];
+    state.mediaCover = null;
     state.mediaProductId = null;
   });
 }
@@ -344,19 +346,33 @@ function mediaPreview(item) {
 function renderMedia() {
   const grid = $('.media-grid');
   grid.replaceChildren();
-  if (!state.media.length) {
+  const entries = state.mediaCover ? [state.mediaCover, ...state.media] : [...state.media];
+  if (!entries.length) {
     grid.append(createElement('div', {
       className: 'media-empty',
       text: 'Este producto todavía no tiene vistas adicionales. Su portada seguirá apareciendo en la tienda.',
     }));
     return;
   }
-  state.media.forEach((item, index) => {
+  entries.forEach((item, index) => {
     const card = createElement('article', { className: 'media-card' });
     const frame = createElement('div', { className: 'media-frame' });
     frame.append(mediaPreview(item), createElement('span', {
-      className: 'media-kind', text: item.type === 'video' ? 'Video' : 'Imagen',
+      className: 'media-kind', text: item.isCover ? 'Imagen · portada' : item.type === 'video' ? 'Video' : 'Imagen',
     }));
+    if (item.isCover) {
+      const copy = createElement('div', { className: 'media-cover-details' });
+      copy.append(
+        createElement('strong', { text: item.altText }),
+        createElement('small', { text: 'Imagen existente del producto. También aparece en el catálogo.' }),
+      );
+      const actions = createElement('div', { className: 'media-actions' });
+      const edit = createElement('button', { className: 'small-button', text: 'Cambiar portada', type: 'button' });
+      edit.dataset.editCover = 'true';
+      actions.append(edit);
+      card.append(frame, copy, actions); grid.append(card);
+      return;
+    }
     const field = createElement('label', { className: 'media-alt-field' });
     field.append(createElement('span', { text: 'Texto descriptivo' }));
     const alt = createElement('input');
@@ -364,9 +380,9 @@ function renderMedia() {
     field.append(alt);
     const actions = createElement('div', { className: 'media-actions' });
     const up = createElement('button', { className: 'small-button', text: '↑', type: 'button' });
-    up.dataset.moveMedia = item.id; up.dataset.direction = '-1'; up.disabled = index === 0;
+    up.dataset.moveMedia = item.id; up.dataset.direction = '-1'; up.disabled = index === 1;
     const down = createElement('button', { className: 'small-button', text: '↓', type: 'button' });
-    down.dataset.moveMedia = item.id; down.dataset.direction = '1'; down.disabled = index === state.media.length - 1;
+    down.dataset.moveMedia = item.id; down.dataset.direction = '1'; down.disabled = index === entries.length - 1;
     const save = createElement('button', { className: 'small-button', text: 'Guardar', type: 'button' });
     save.dataset.saveMedia = item.id;
     const remove = createElement('button', { className: 'small-button remove', text: 'Quitar', type: 'button' });
@@ -379,15 +395,16 @@ function renderMedia() {
 async function loadProductMedia() {
   const data = await api(`/api/admin/products/${state.mediaProductId}/media`);
   state.media = data.media;
+  state.mediaCover = {
+    id: `cover-${data.product.id}`,
+    type: 'image',
+    url: data.product.coverUrl,
+    altText: `Portada de ${data.product.name}`,
+    isCover: true,
+  };
   $('.media-heading').replaceChildren(
     createElement('h2', { text: `Contenido · ${data.product.name}` }),
-    createElement('p', { text: 'Ordena, describe, añade o retira las vistas de este producto.' }),
-  );
-  const cover = $('.media-cover-image');
-  cover.src = data.product.coverUrl; cover.alt = '';
-  $('.media-cover-copy').replaceChildren(
-    createElement('strong', { text: 'Portada principal' }),
-    createElement('small', { text: 'La portada se cambia desde el botón Editar del producto.' }),
+    createElement('p', { text: 'Administra la portada, las imágenes y los videos incluidos en este producto.' }),
   );
   renderMedia();
 }

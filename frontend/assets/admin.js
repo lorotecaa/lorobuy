@@ -622,13 +622,13 @@ function renderMedia() {
     const card = createElement('article', { className: 'media-card' });
     const frame = createElement('div', { className: 'media-frame' });
     frame.append(mediaPreview(item), createElement('span', {
-      className: 'media-kind', text: item.isCover ? 'Imagen · portada' : item.type === 'video' ? 'Video' : 'Imagen',
+      className: 'media-kind', text: item.isCover || item.isPublicCover ? 'Imagen · portada pública' : item.type === 'video' ? 'Video' : 'Imagen',
     }));
     if (item.isCover) {
       const copy = createElement('div', { className: 'media-cover-details' });
       copy.append(
         createElement('strong', { text: item.altText }),
-        createElement('small', { text: 'Imagen existente del producto. También aparece en el catálogo.' }),
+        createElement('small', { text: 'Portada base. Se utiliza cuando la galería no contiene otra imagen.' }),
       );
       const actions = createElement('div', { className: 'media-actions' });
       const edit = createElement('button', { className: 'small-button', text: 'Cambiar portada', type: 'button' });
@@ -644,9 +644,10 @@ function renderMedia() {
     field.append(alt);
     const actions = createElement('div', { className: 'media-actions' });
     const up = createElement('button', { className: 'small-button', text: '↑', type: 'button' });
-    up.dataset.moveMedia = item.id; up.dataset.direction = '-1'; up.disabled = index === 1;
+    const mediaIndex = state.media.findIndex((entry) => entry.id === item.id);
+    up.dataset.moveMedia = item.id; up.dataset.direction = '-1'; up.disabled = mediaIndex === 0;
     const down = createElement('button', { className: 'small-button', text: '↓', type: 'button' });
-    down.dataset.moveMedia = item.id; down.dataset.direction = '1'; down.disabled = index === entries.length - 1;
+    down.dataset.moveMedia = item.id; down.dataset.direction = '1'; down.disabled = mediaIndex === state.media.length - 1;
     const save = createElement('button', { className: 'small-button', text: 'Guardar', type: 'button' });
     save.dataset.saveMedia = item.id;
     const remove = createElement('button', { className: 'small-button remove', text: 'Quitar', type: 'button' });
@@ -658,8 +659,8 @@ function renderMedia() {
 
 async function loadProductMedia() {
   const data = await api(`/api/admin/products/${state.mediaProductId}/media`);
-  state.media = data.media;
-  state.mediaCover = {
+  state.media = data.media.map((item) => ({ ...item, isPublicCover: item.id === data.product.coverMediaId }));
+  state.mediaCover = data.product.coverMediaId ? null : {
     id: `cover-${data.product.id}`,
     type: 'image',
     url: data.product.coverUrl,
@@ -668,7 +669,7 @@ async function loadProductMedia() {
   };
   $('.media-heading').replaceChildren(
     createElement('h2', { text: `Contenido · ${data.product.name}` }),
-    createElement('p', { text: 'Administra la portada, las imágenes y los videos incluidos en este producto.' }),
+    createElement('p', { text: 'La primera imagen será la portada pública. Los videos e imágenes se actualizan automáticamente en toda la tienda.' }),
   );
   renderMedia();
 }
@@ -679,7 +680,7 @@ async function openMedia(product) {
   $('.media-heading').replaceChildren(createElement('h2', { text: `Contenido · ${product.name}` }));
   $('.media-grid').replaceChildren(createElement('div', { className: 'media-empty', text: 'Cargando contenido…' }));
   $('.media-files').value = '';
-  $('.media-upload-status').textContent = 'Imágenes o videos de máximo 100 MB. Los videos se optimizan automáticamente para reproducción rápida.';
+  $('.media-upload-status').textContent = 'Imágenes o videos de máximo 100 MB. La primera imagen será la portada; los videos se optimizan automáticamente.';
   mediaDialog.showModal();
   try { await loadProductMedia(); }
   catch (error) { $('.media-upload-status').textContent = error.message; }
@@ -713,8 +714,8 @@ async function uploadSelectedMedia() {
     }
     input.value = '';
     await loadProductMedia();
-    $('.media-upload-status').textContent = 'Contenido optimizado, subido a Supabase y publicado en la galería.';
-    toast('La galería del producto ya está actualizada.');
+    $('.media-upload-status').textContent = 'Contenido optimizado y publicado. La tienda se actualizará automáticamente.';
+    toast('Contenido actualizado en el panel y en la tienda pública.');
   } catch (error) {
     $('.media-upload-status').textContent = error.message;
     toast(error.message, 'error');

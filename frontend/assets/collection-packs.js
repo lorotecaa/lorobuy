@@ -24,18 +24,13 @@ function money(cents, currency = 'USD') {
 }
 
 function safeImage(value) {
-  return /^assets\/[a-z0-9-]+\.(?:webp|png|jpe?g)$/i.test(value || '')
-    ? `/${value}` : '/assets/favicon.png';
+  const local = /^\/?assets\/[a-z0-9/_-]+\.(?:webp|png|jpe?g|gif)(?:\?v=[a-z0-9-]+)?$/i.test(value || '');
+  const storage = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/product-media\/[a-z0-9/_-]+\.(?:webp|png|jpe?g|gif)(?:\?.*)?$/i.test(value || '');
+  if (storage) return value;
+  return local ? `/${String(value).replace(/^\//, '')}` : '/assets/favicon.png';
 }
 
 function safeVideo(value) {
-  const normalized = String(value || '');
-  if (/\/product-media\/mega-pack-dioses-nordicos\.mp4(?:\?.*)?$/i.test(normalized)) {
-    return '/assets/previews/mega-pack-dioses-nordicos.mp4?v=20261006-local-delivery-1';
-  }
-  if (/\/product-media\/hero\.mp4(?:\?.*)?$/i.test(normalized)) {
-    return '/assets/hero.mp4?v=20261006-local-delivery-1';
-  }
   const local = /^\/?assets\/[a-z0-9/_-]+\.(?:mp4|webm)(?:\?v=[a-z0-9-]+)?$/i.test(value || '');
   const storage = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/product-media\/[a-z0-9/_-]+\.(?:mp4|webm|mov)(?:\?.*)?$/i.test(value || '');
   return local || storage ? value : '/assets/hero.mp4?v=20261005-stream-1';
@@ -63,6 +58,7 @@ function createSequentialPlayer(video, product, { onIndex, onProgress } = {}) {
   let destroyed = false;
   let failedSources = 0;
   video.autoplay = true;
+  video.crossOrigin = 'anonymous';
   video.defaultMuted = true;
   video.muted = true;
 
@@ -180,10 +176,12 @@ function productCard(product) {
   poster.href = href;
   poster.setAttribute('aria-label', `Ver ${product.name}`);
   const image = element('img');
+  image.crossOrigin = 'anonymous';
   image.src = safeImage(product.imagePath);
   image.alt = product.name;
   image.loading = 'lazy';
   const preview = element('video');
+  preview.crossOrigin = 'anonymous';
   preview.muted = true;
   preview.loop = true;
   preview.playsInline = true;
@@ -248,9 +246,11 @@ function renderShowcase(products) {
     link.href = `/products/${encodeURIComponent(product.slug)}`;
     link.setAttribute('aria-label', `Ver ${product.name}`);
     const image = element('img');
+    image.crossOrigin = 'anonymous';
     image.src = safeImage(product.imagePath);
     image.alt = product.name;
     const video = element('video');
+    video.crossOrigin = 'anonymous';
     video.muted = true;
     video.defaultMuted = true;
     video.autoplay = true;
@@ -313,6 +313,7 @@ function renderNewest(product) {
   media.href = href;
   media.setAttribute('aria-label', `Ver ${product.name}`);
   const image = $('img', media);
+  image.crossOrigin = 'anonymous';
   image.src = safeImage(product.imagePath);
   image.alt = product.name;
   const video = $('.newest-video', media);
@@ -353,7 +354,7 @@ async function loadProducts() {
     $('[data-battle-count]').textContent = String(battle.length);
     const ordered = [...state.products].sort((a, b) => a.sortOrder - b.sortOrder);
     renderShowcase(ordered);
-    renderNewest(ordered.find((product) => product.slug === 'mega-pack-dioses-nordicos') || ordered[0]);
+    renderNewest(ordered[0]);
     applyFilters();
   } catch (error) {
     grid.replaceChildren(element('div', { className: 'loading-card', text: error.message }));
@@ -379,7 +380,7 @@ function renderCart(cart) {
   }
   for (const item of cart.items) {
     const row = element('article', { className: 'cart-item' });
-    const image = element('img'); image.src = safeImage(item.imagePath); image.alt = '';
+    const image = element('img'); image.crossOrigin = 'anonymous'; image.src = safeImage(item.imagePath); image.alt = '';
     const copy = element('div', { className: 'cart-item-copy' });
     const link = element('a', { text: item.name }); link.href = `/products/${encodeURIComponent(item.slug)}`;
     const details = element('small', { text: `${item.quantity} × ${money(item.unitPriceCents, item.currency)} ${item.currency}` });

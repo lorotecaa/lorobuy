@@ -219,8 +219,8 @@ test('packs CTA opens a complete Supabase-backed collection page', () => {
   assert.match(packsCollectionScript, /Array\.isArray\(product\?\.media\)/);
   assert.match(packsCollectionScript, /function createSequentialPlayer/);
   assert.match(packsCollectionScript, /video\.addEventListener\('ended', handleEnded\)/);
-  assert.match(packsCollectionScript, /product\.slug === 'mega-pack-dioses-nordicos'/);
-  assert.match(packsCollectionScript, /assets\/previews\/mega-pack-dioses-nordicos\.mp4/);
+  assert.match(packsCollectionScript, /renderNewest\(ordered\[0\]\)/);
+  assert.match(packsCollectionScript, /video\.crossOrigin = 'anonymous'/);
   assert.match(packsCollectionScript, /video\.addEventListener\('loadeddata', handleReady\)/);
   assert.doesNotMatch(packsCollectionScript, /\.innerHTML\s*=|insertAdjacentHTML|outerHTML\s*=/);
 });
@@ -316,12 +316,16 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(server, /app\.patch\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
   assert.match(server, /app\.delete\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
   assert.match(adminScript, /dataset\.media = product\.id/);
-  assert.match(adminScript, /state\.mediaCover = \{/);
+  assert.match(adminScript, /state\.mediaCover = data\.product\.coverMediaId \? null : \{/);
+  assert.match(adminScript, /isPublicCover: item\.id === data\.product\.coverMediaId/);
   assert.match(adminScript, /Imagen · portada/);
   assert.match(adminScript, /image\/jpeg,image\/png,image\/webp,image\/gif/);
   assert.match(adminScript, /uploadSelectedMedia/);
   assert.match(adminScript, /moveMedia/);
   assert.match(adminScript, /removeMedia/);
+  assert.match(server, /const primaryImage = media\.find\(\(item\) => item\.type === 'image'\)/);
+  assert.match(server, /imagePath: storefrontImage/);
+  assert.equal((server.match(/response\.set\('Cache-Control', 'no-store, max-age=0'\);/g) ?? []).length >= 2, true);
 });
 
 test('admin access is enforced by confirmed Supabase identity, backend role checks, and RLS', () => {

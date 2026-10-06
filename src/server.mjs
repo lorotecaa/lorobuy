@@ -325,14 +325,16 @@ function publicProduct(row, mediaRows = []) {
     : imagePath;
   const media = mediaRows.map(productMedia).filter((item) => item.url);
   const primaryVideo = media.find((item) => item.type === 'video');
+  const primaryImage = media.find((item) => item.type === 'image');
+  const storefrontImage = primaryImage?.url ?? imagePath;
   return {
     id: row.id,
     slug: row.slug,
     name: row.name,
     description: row.description,
-    imagePath,
+    imagePath: storefrontImage,
     previewPath: primaryVideo?.url ?? `${previewPath}?v=${MEDIA_ASSET_VERSION}`,
-    previewThumbnailPath,
+    previewThumbnailPath: primaryImage?.url ?? previewThumbnailPath,
     priceCents: row.price_cents,
     compareAtPriceCents: row.compare_at_price_cents,
     currency: row.currency,
@@ -424,7 +426,7 @@ app.get('/api/products', asyncRoute(async (_request, response) => {
     }
   }
 
-  response.set('Cache-Control', 'public, max-age=30, s-maxage=60');
+  response.set('Cache-Control', 'no-store, max-age=0');
   return response.json({
     products: products.map((row) => publicProduct(row, mediaByProduct.get(row.id) ?? [])),
   });
@@ -452,7 +454,7 @@ app.get('/api/products/:slug', asyncRoute(async (request, response) => {
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: true });
   if (mediaError) throw new Error('Unable to load product media from Supabase.');
-  response.set('Cache-Control', 'public, max-age=30, s-maxage=60');
+  response.set('Cache-Control', 'no-store, max-age=0');
   return response.json({ product: publicProduct(data[0], media ?? []) });
 }));
 
@@ -1206,15 +1208,18 @@ app.get('/api/admin/products/:productId/media', asyncRoute(async (request, respo
     return response.status(404).json({ error: 'Producto no encontrado.' });
   }
   if (mediaResult.error) throw new Error('Unable to load product media from Supabase.');
+  const media = (mediaResult.data ?? []).map(productMedia);
+  const primaryImage = media.find((item) => item.type === 'image');
   response.set('Cache-Control', 'private, no-store, max-age=0');
   return response.json({
     product: {
       id: productResult.data.id,
       name: productResult.data.name,
-      coverUrl: IMAGE_PATTERN.test(productResult.data.image_path)
-        ? `/${productResult.data.image_path}` : '/assets/favicon.png',
+      coverUrl: primaryImage?.url ?? (IMAGE_PATTERN.test(productResult.data.image_path)
+        ? `/${productResult.data.image_path}` : '/assets/favicon.png'),
+      coverMediaId: primaryImage?.id ?? null,
     },
-    media: (mediaResult.data ?? []).map(productMedia),
+    media,
   });
 }));
 

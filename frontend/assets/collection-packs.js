@@ -1,7 +1,7 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const DISCOUNT_STORAGE_KEY = 'lorobuy-welcome-discount-v1';
-const state = { products: [], filter: 'all', query: '', sort: 'featured', cart: null };
+const state = { products: [], categoryMedia: [], filter: 'all', query: '', sort: 'featured', cart: null };
 const grid = $('.product-grid');
 const toast = $('.toast');
 const cartDrawer = $('.cart-drawer');
@@ -243,22 +243,25 @@ function applyFilters() {
   grid.hidden = products.length === 0;
 }
 
-function renderShowcase(products) {
+function renderShowcase(products, categoryMedia = []) {
   const showcase = $('.showcase-grid');
   clearInterval(showcaseRotation);
   showcaseObserver?.disconnect();
   showcaseActiveVideo?.pause();
   showcaseActiveVideo = null;
   showcase.replaceChildren();
-  const featuredProducts = products.slice(0, 4);
-  for (const product of featuredProducts) {
+  const entries = categoryMedia.length
+    ? categoryMedia.slice(0, 4).map((media, index) => ({ media, product: products[index % Math.max(products.length, 1)] }))
+    : products.slice(0, 4).map((product) => ({ product, media: productVideoSources(product)[0] }));
+  for (const entry of entries) {
+    const product = entry.product;
     const link = element('a', { className: 'showcase-item' });
-    link.href = `/products/${encodeURIComponent(product.slug)}`;
-    link.setAttribute('aria-label', `Ver ${product.name}`);
+    link.href = product ? `/products/${encodeURIComponent(product.slug)}` : '#productos';
+    link.setAttribute('aria-label', entry.media?.altText || (product ? `Ver ${product.name}` : 'Ver packs completos'));
     const image = element('img');
     image.crossOrigin = 'anonymous';
-    image.src = safeImage(product.imagePath);
-    image.alt = product.name;
+    image.src = safeImage(product?.imagePath);
+    image.alt = product?.name || '';
     const video = element('video');
     video.crossOrigin = 'anonymous';
     video.muted = true;
@@ -269,9 +272,9 @@ function renderShowcase(products) {
     video.preload = 'none';
     video.disablePictureInPicture = true;
     video.setAttribute('aria-hidden', 'true');
-    const source = productVideoSources(product)[0];
+    const source = categoryMedia.length ? { url: entry.media?.url, label: entry.media?.altText } : entry.media;
     if (source) video.dataset.source = safeVideo(source.url);
-    link.append(image, video, element('span', { className: 'showcase-live', text: 'En vivo' }), element('span', { className: 'showcase-name', text: product.name }));
+    link.append(image, video, element('span', { className: 'showcase-live', text: 'En vivo' }), element('span', { className: 'showcase-name', text: source?.label || product?.name || 'Packs completos' }));
     showcase.append(link);
   }
 
@@ -352,9 +355,14 @@ function renderNewest(product) {
 
 async function loadProducts() {
   try {
-    const response = await fetch('/api/products', { headers: { Accept: 'application/json' }, credentials: 'same-origin' });
-    if (!response.ok) throw new Error('No fue posible cargar los packs.');
-    const data = await response.json();
+    const [productsResponse, categoryMediaResponse] = await Promise.all([
+      fetch('/api/products', { headers: { Accept: 'application/json' }, credentials: 'same-origin' }),
+      fetch('/api/categories/packs-completos/media', { headers: { Accept: 'application/json' }, credentials: 'same-origin' }),
+    ]);
+    if (!productsResponse.ok) throw new Error('No fue posible cargar los packs.');
+    const data = await productsResponse.json();
+    const categoryData = categoryMediaResponse.ok ? await categoryMediaResponse.json() : { media: [] };
+    state.categoryMedia = Array.isArray(categoryData.media) ? categoryData.media : [];
     state.products = (Array.isArray(data.products) ? data.products : [])
       .filter((product) => product.category?.slug === 'packs-completos');
     const mega = state.products.filter((product) => productKind(product) === 'mega');
@@ -363,7 +371,7 @@ async function loadProducts() {
     $('[data-mega-count]').textContent = String(mega.length);
     $('[data-battle-count]').textContent = String(battle.length);
     const ordered = [...state.products].sort((a, b) => a.sortOrder - b.sortOrder);
-    renderShowcase(ordered);
+    renderShowcase(ordered, state.categoryMedia);
     renderNewest(ordered[0]);
     applyFilters();
   } catch (error) {

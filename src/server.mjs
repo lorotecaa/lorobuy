@@ -534,6 +534,35 @@ app.get('/api/products/:slug', asyncRoute(async (request, response) => {
   return response.json({ product: publicProduct(data[0], media ?? []) });
 }));
 
+app.get('/api/categories/:slug/media', asyncRoute(async (request, response) => {
+  const categorySlug = normalizeText(request.params.slug, 80, { required: true });
+  if (!categorySlug || !SLUG_PATTERN.test(categorySlug)) {
+    return response.status(404).json({ error: 'Categoría no encontrada.' });
+  }
+  const { data: category, error: categoryError } = await publicSupabase
+    .from('categories')
+    .select('id,slug,name')
+    .eq('slug', categorySlug)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (categoryError) throw new Error('Unable to load category from Supabase.');
+  if (!category) return response.status(404).json({ error: 'Categoría no encontrada.' });
+
+  const { data: mediaRows, error: mediaError } = await publicSupabase
+    .from('category_media')
+    .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,created_at')
+    .eq('category_id', category.id)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (mediaError) throw new Error('Unable to load category media from Supabase.');
+  response.set('Cache-Control', 'no-store, max-age=0');
+  return response.json({
+    category: { id: category.id, slug: category.slug, name: category.name },
+    media: (mediaRows ?? []).map(productMedia),
+  });
+}));
+
 app.get('/api/auth/session', asyncRoute(async (request, response) => {
   const session = await getRequestSession(request, response, config);
   const signedIn = Boolean(session && !session.user.is_anonymous);
@@ -971,6 +1000,175 @@ app.delete('/api/admin/categories/:categoryId', asyncRoute(async (request, respo
   return response.json({ category: data, deactivated: true });
 }));
 
+app.get('/api/admin/categories/:categoryId/media', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.categoryId)) return response.status(400).json({ error: 'Categoría no válida.' });
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  const [categoryResult, mediaResult] = await Promise.all([
+    session.client
+      .from('categories')
+      .select('id,slug,name')
+      .eq('id', request.params.categoryId)
+      .maybeSingle(),
+    session.client
+      .from('category_media')
+      .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,is_active,created_at')
+      .eq('category_id', request.params.categoryId)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+  ]);
+  if (categoryResult.error || !categoryResult.data) {
+    return response.status(404).json({ error: 'Categoría no encontrada.' });
+  }
+  if (mediaResult.error) throw new Error('Unable to load category media from Supabase.');
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({
+    category: categoryResult.data,
+    media: (mediaResult.data ?? []).map(productMedia),
+  });
+}));
+
+app.post(
+  '/api/admin/categories/:categoryId/media',
+  adminOnly,
+  express.raw({ type: ['video/mp4', 'video/webm', 'video/quicktime'], limit: MAX_PRODUCT_MEDIA_BYTES }),
+  asyncRoute(async (request, response) => {
+    if (!isUuid(request.params.categoryId)) return response.status(400).json({ error: 'Categoría no válida.' });
+    const session = request.adminSession;
+    if (!adminSupabase) return response.status(503).json({ error: 'La carga de videos no está configurada.' });
+    const mimeType = request.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+    const mediaDefinition = PRODUCT_MEDIA_MIME_TYPES.get(mimeType);
+    const body = Buffer.isBuffer(request.body) ? request.body : null;
+    if (mediaDefinition?.type !== 'video' || !body?.length || body.length > MAX_PRODUCT_MEDIA_BYTES) {
+      return response.status(400).json({ error: 'Selecciona un video MP4, WebM o MOV válido de máximo 100 MB.' });
+    }
+    let storedBody;
+    try {
+      storedBody = await optimizeUploadedVideo(body, mediaDefinition.extension);
+    } catch (error) {
+      console.warn(JSON.stringify({
+        level: 'warn', event: 'category_media_video_optimization_failed',
+        message: error?.message ?? 'Unknown optimization error',
+      }));
+      return response.status(400).json({
+        error: 'No fue posible optimizar el video. Usa un MP4, WebM o MOV válido de hasta 100 MB y duración moderada.',
+      });
+    }
+    let altText = '';
+    try {
+      altText = normalizeText(decodeURIComponent(request.get('x-media-alt') ?? ''), 180);
+    } catch {
+      return response.status(400).json({ error: 'La descripción del video no es válida.' });
+    }
+    if (altText === null) return response.status(400).json({ error: 'La descripción del video no es válida.' });
+    const { data: category, error: categoryError } = await session.client
+      .from('categories')
+      .select('id,name')
+      .eq('id', request.params.categoryId)
+      .maybeSingle();
+    if (categoryError || !category) return response.status(404).json({ error: 'Categoría no encontrada.' });
+    const { data: latestMedia, error: latestError } = await session.client
+      .from('category_media')
+      .select('sort_order')
+      .eq('category_id', category.id)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: false })
+      .limit(1);
+    if (latestError) throw new Error('Unable to determine category media order.');
+    const sortOrder = Math.min(100_000, Number(latestMedia?.[0]?.sort_order ?? -10) + 10);
+    const storagePath = `categories/${category.id}/${crypto.randomUUID()}.mp4`;
+    const { error: uploadError } = await adminSupabase.storage
+      .from('product-media')
+      .upload(storagePath, storedBody, {
+        contentType: 'video/mp4', cacheControl: '31536000', upsert: false,
+      });
+    if (uploadError) return response.status(502).json({ error: 'No fue posible subir el video a Supabase.' });
+    const { data: created, error: insertError } = await session.client
+      .from('category_media')
+      .insert({
+        category_id: category.id,
+        storage_path: storagePath,
+        media_type: 'video',
+        mime_type: 'video/mp4',
+        byte_size: storedBody.length,
+        alt_text: altText || `Video de ${category.name}`,
+        sort_order: sortOrder,
+      })
+      .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,is_active,created_at')
+      .single();
+    if (insertError || !created) {
+      await adminSupabase.storage.from('product-media').remove([storagePath]);
+      return response.status(400).json({ error: 'No fue posible asociar el video a la categoría.' });
+    }
+    response.set('Cache-Control', 'private, no-store, max-age=0');
+    return response.status(201).json({ media: productMedia(created), optimized: true });
+  }),
+);
+
+app.patch('/api/admin/categories/:categoryId/media/:mediaId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.categoryId) || !isUuid(request.params.mediaId)) {
+    return response.status(400).json({ error: 'Video no válido.' });
+  }
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  const payload = {};
+  if (Object.hasOwn(request.body ?? {}, 'altText')) {
+    const altText = normalizeText(request.body.altText, 180);
+    if (altText === null) return response.status(400).json({ error: 'La descripción del video no es válida.' });
+    payload.alt_text = altText || null;
+  }
+  if (Object.hasOwn(request.body ?? {}, 'sortOrder')) {
+    payload.sort_order = integerInRange(request.body.sortOrder, 0, 100_000);
+    if (payload.sort_order === null) return response.status(400).json({ error: 'El orden no es válido.' });
+  }
+  if (!Object.keys(payload).length) return response.status(400).json({ error: 'No hay cambios válidos.' });
+  const { data, error } = await session.client
+    .from('category_media')
+    .update(payload)
+    .eq('id', request.params.mediaId)
+    .eq('category_id', request.params.categoryId)
+    .eq('is_active', true)
+    .select('id,source_path,storage_path,media_type,mime_type,byte_size,alt_text,sort_order,is_active,created_at')
+    .maybeSingle();
+  if (error || !data) return response.status(404).json({ error: 'Video no encontrado.' });
+  return response.json({ media: productMedia(data) });
+}));
+
+app.delete('/api/admin/categories/:categoryId/media/:mediaId', asyncRoute(async (request, response) => {
+  if (!isUuid(request.params.categoryId) || !isUuid(request.params.mediaId)) {
+    return response.status(400).json({ error: 'Video no válido.' });
+  }
+  const session = await requireAdmin(request, response, config);
+  if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
+  const { data, error } = await session.client
+    .from('category_media')
+    .update({ is_active: false })
+    .eq('id', request.params.mediaId)
+    .eq('category_id', request.params.categoryId)
+    .eq('is_active', true)
+    .select('id,storage_path')
+    .maybeSingle();
+  if (error || !data) return response.status(404).json({ error: 'Video no encontrado.' });
+  if (data.storage_path && adminSupabase) {
+    const { data: remainingReferences, error: referenceError } = await adminSupabase
+      .from('category_media')
+      .select('id')
+      .eq('storage_path', data.storage_path)
+      .eq('is_active', true)
+      .limit(1);
+    if (referenceError) {
+      console.warn(JSON.stringify({ level: 'warn', event: 'category_media_reference_check_failed', mediaId: data.id }));
+    } else if (!remainingReferences?.length) {
+      const { error: storageError } = await adminSupabase.storage.from('product-media').remove([data.storage_path]);
+      if (storageError) {
+        console.warn(JSON.stringify({ level: 'warn', event: 'category_media_storage_cleanup_failed', mediaId: data.id }));
+      }
+    }
+  }
+  return response.json({ removed: true });
+}));
+
 function adminProduct(row) {
   return {
     id: row.id,
@@ -993,7 +1191,7 @@ app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
   const session = await requireAdmin(request, response, config);
   if (!session) return response.status(403).json({ error: 'Autorización administrativa requerida.' });
 
-  const [productsResult, categoriesResult] = await Promise.all([
+  const [productsResult, categoriesResult, categoryMediaResult] = await Promise.all([
     session.client
       .from('products')
       .select('id,category_id,slug,name,description,image_path,price_cents,compare_at_price_cents,currency,sort_order,is_active,updated_at,categories(id,slug,name)')
@@ -1003,9 +1201,13 @@ app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
       .from('categories')
       .select('id,slug,name,sort_order,is_active,created_at,updated_at')
       .order('sort_order', { ascending: true }),
+    session.client
+      .from('category_media')
+      .select('category_id')
+      .eq('is_active', true),
   ]);
 
-  if (productsResult.error || categoriesResult.error) {
+  if (productsResult.error || categoriesResult.error || categoryMediaResult.error) {
     throw new Error('Unable to load the administrative catalog from Supabase.');
   }
   response.set('Cache-Control', 'private, no-store, max-age=0');
@@ -1022,6 +1224,7 @@ app.get('/api/admin/catalog', asyncRoute(async (request, response) => {
       updatedAt: category.updated_at,
       productCount: products.filter((product) => product.categoryId === category.id).length,
       activeProductCount: products.filter((product) => product.categoryId === category.id && product.isActive).length,
+      videoCount: (categoryMediaResult.data ?? []).filter((media) => media.category_id === category.id).length,
     })),
   });
 }));

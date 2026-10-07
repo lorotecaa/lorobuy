@@ -153,7 +153,7 @@
         </div>
         <div class="cta-row"><a class="btn green" href="/collections/packs-completos">Ver packs completos</a><a class="btn outline" href="#catalogo">Ver todo el catálogo</a></div><p class="note">Listas para TikTok LIVE Studio y OBS. Fondo transparente.</p>
       </div>
-      <div class="phone-wrap reveal"><div class="phone"><video src="assets/hero.mp4?v=20261005-stream-1" autoplay muted loop playsinline preload="metadata" poster="assets/genio.webp" disablepictureinpicture></video><span class="live-tag">LIVE</span></div></div>
+      <div class="phone-wrap reveal"><div class="phone"><video id="homeHeroVideo" src="assets/hero.mp4?v=20261005-stream-1" autoplay muted loop playsinline preload="metadata" poster="assets/genio.webp" disablepictureinpicture></video><span class="live-tag">LIVE</span></div></div>
     </div></section>
 
     <section class="section" id="animaciones"><div class="shell"><div class="head-row reveal"><h2 class="section-title">Elige tu animación</h2><p>Encuentra el efecto para cada momento de tu live.</p></div><div class="category-grid">
@@ -271,10 +271,17 @@
         renderProducts(packGrid,byCategory('packs-completos'),true);renderProducts(loveGrid,byCategory('quiereme'),false);renderProducts(snipeGrid,byCategory('snipe-galeria'),false);observeReveals()
       }catch{[packGrid,loveGrid,snipeGrid].forEach(grid=>grid.replaceChildren(make('p','note','El catálogo no está disponible temporalmente.')))}
     }
+    async function loadCategoryHero(){
+      try{
+        const response=await fetch('/api/categories/packs-completos/media',{headers:{Accept:'application/json'},credentials:'same-origin'});if(!response.ok)return;
+        const data=await response.json(),primary=Array.isArray(data.media)?data.media.find(item=>item.type==='video'):null,video=document.querySelector('#homeHeroVideo');if(!primary?.url||!video)return;
+        const source=safeVideo(primary.url);if(video.getAttribute('src')===source)return;video.src=source;video.load();video.play().catch(()=>{});
+      }catch{}
+    }
     async function loadCart(){try{const response=await fetch('/api/cart',{headers:{Accept:'application/json'},credentials:'same-origin'});if(response.ok){const {cart}=await response.json();setCartCount(cart.itemCount)}}catch{}}
     document.addEventListener('click',async e=>{if(!(e.target instanceof Element))return;const b=e.target.closest('button.add');if(!b||b.disabled)return;b.disabled=true;const original=b.textContent;b.textContent='Agregando…';try{const response=await fetch('/api/cart/items',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},credentials:'same-origin',body:JSON.stringify({productId:b.dataset.productId,quantity:1})});if(!response.ok)throw new Error('cart');const {cart}=await response.json();setCartCount(cart.itemCount);b.textContent='Agregado ✓';b.classList.add('added');showToast(`${b.dataset.name||'Producto'} agregado`)}catch{b.textContent=original;showToast('No fue posible actualizar el carrito.',false)}finally{b.disabled=false}});
     const menu=document.querySelector('.menu-btn'),links=document.querySelector('.navlinks');menu.addEventListener('click',()=>{const open=menu.getAttribute('aria-expanded')==='true';menu.setAttribute('aria-expanded',String(!open));links.classList.toggle('menu-open',!open)});
-    observeReveals();loadProducts();loadCart();
+    observeReveals();loadProducts();loadCategoryHero();loadCart();
     const countIo=new IntersectionObserver(entries=>entries.forEach(x=>{if(!x.isIntersecting)return;const el=x.target,end=Number(el.dataset.count),start=performance.now();function tick(now){const p=Math.min(1,(now-start)/1100);const n=Math.round(end*(1-Math.pow(1-p,3)));el.textContent=end>999?n.toLocaleString('en-US'):n;if(p<1)requestAnimationFrame(tick)}requestAnimationFrame(tick);countIo.unobserve(el)}),{threshold:.5});document.querySelectorAll('[data-count]').forEach(el=>countIo.observe(el));
     const battleDemo=document.querySelector('[data-battle-demo]');
     if(battleDemo){

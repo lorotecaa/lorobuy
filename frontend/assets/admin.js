@@ -5,6 +5,7 @@ const state = {
   media: [], mediaCover: null, editingId: null, deactivateId: null, editingUserId: null,
   mediaProductId: null, activeOrderId: null, orderAction: null,
   editingCategoryId: null, deactivateCategoryId: null,
+  categoryMedia: [], categoryMediaId: null,
 };
 const productDialog = $('.product-dialog');
 const confirmDialog = $('.confirm-dialog');
@@ -17,6 +18,7 @@ let orderActionDialog;
 let categoryDialog;
 let categoryForm;
 let categoryDeactivateDialog;
+let categoryMediaDialog;
 let categorySlugEdited = false;
 
 const money = (cents, currency = 'USD') => new Intl.NumberFormat('en-US', {
@@ -490,6 +492,59 @@ function initializeMediaInterface() {
   });
 }
 
+function initializeCategoryMediaInterface() {
+  categoryMediaDialog = createElement('dialog', { className: 'media-dialog category-media-dialog' });
+  const shell = createElement('div');
+  const head = createElement('div', { className: 'modal-head' });
+  head.append(
+    createElement('div', { className: 'category-media-heading media-heading' }),
+    createElement('button', { className: 'close close-category-media', text: '×', type: 'button' }),
+  );
+  const body = createElement('div', { className: 'modal-body' });
+  const notice = createElement('div', { className: 'category-media-notice' });
+  notice.append(
+    createElement('strong', { text: 'Actualización automática' }),
+    createElement('p', { text: 'El primer video es el principal. En Packs completos también controla el video grande del inicio; no necesitas hacer deploy.' }),
+  );
+  const upload = createElement('div', { className: 'media-upload' });
+  const fileInput = createElement('input', { className: 'category-media-files' });
+  fileInput.type = 'file'; fileInput.multiple = true;
+  fileInput.accept = 'video/mp4,video/webm,video/quicktime';
+  upload.append(
+    fileInput,
+    createElement('button', { className: 'primary upload-category-media', text: 'Subir videos', type: 'button' }),
+  );
+  body.append(
+    notice,
+    upload,
+    createElement('p', { className: 'category-media-status media-upload-status', text: 'Videos MP4, WebM o MOV de máximo 100 MB por archivo.' }),
+    createElement('div', { className: 'category-media-grid media-grid' }),
+  );
+  const foot = createElement('div', { className: 'modal-foot' });
+  foot.append(createElement('button', { className: 'secondary close-category-media', text: 'Cerrar', type: 'button' }));
+  shell.append(head, body, foot); categoryMediaDialog.append(shell); document.body.append(categoryMediaDialog);
+
+  $$('.close-category-media', categoryMediaDialog).forEach((button) => button.addEventListener('click', () => categoryMediaDialog.close()));
+  $('.upload-category-media', categoryMediaDialog).addEventListener('click', uploadSelectedCategoryMedia);
+  $('.category-media-grid', categoryMediaDialog).addEventListener('click', async (event) => {
+    const primary = event.target.closest('[data-primary-category-media]');
+    const save = event.target.closest('[data-save-category-media]');
+    const move = event.target.closest('[data-move-category-media]');
+    const remove = event.target.closest('[data-remove-category-media]');
+    if (primary) await makeCategoryMediaPrimary(primary.dataset.primaryCategoryMedia);
+    if (save) await saveCategoryMedia(save.dataset.saveCategoryMedia);
+    if (move) await moveCategoryMedia(move.dataset.moveCategoryMedia, Number(move.dataset.direction));
+    if (remove && window.confirm('¿Quitar este video de la categoría y de la tienda pública?')) {
+      await removeCategoryMedia(remove.dataset.removeCategoryMedia);
+    }
+  });
+  categoryMediaDialog.addEventListener('close', () => {
+    $('.category-media-grid', categoryMediaDialog).replaceChildren();
+    state.categoryMedia = [];
+    state.categoryMediaId = null;
+  });
+}
+
 function show(view) {
   $$('.view').forEach((panel) => { panel.hidden = panel.dataset.panel !== view; });
   $$('[data-view]').forEach((link) => link.classList.toggle('active', link.dataset.view === view));
@@ -759,6 +814,154 @@ async function removeMedia(mediaId) {
   } catch (error) { toast(error.message, 'error'); }
 }
 
+function renderCategoryMedia() {
+  const grid = $('.category-media-grid', categoryMediaDialog);
+  grid.replaceChildren();
+  if (!state.categoryMedia.length) {
+    grid.append(createElement('div', {
+      className: 'media-empty',
+      text: 'Esta categoría todavía no tiene videos. Sube uno y aparecerá automáticamente en la tienda.',
+    }));
+    return;
+  }
+  state.categoryMedia.forEach((item, index) => {
+    const card = createElement('article', { className: 'media-card category-video-card' });
+    const frame = createElement('div', { className: 'media-frame' });
+    const video = mediaPreview(item);
+    frame.append(video, createElement('span', {
+      className: 'media-kind', text: index === 0 ? 'Video principal' : `Video ${index + 1}`,
+    }));
+    const field = createElement('label', { className: 'media-alt-field' });
+    field.append(createElement('span', { text: 'Descripción' }));
+    const alt = createElement('input');
+    alt.value = item.altText || ''; alt.maxLength = 180; alt.dataset.categoryMediaAlt = item.id;
+    field.append(alt);
+    const actions = createElement('div', { className: 'media-actions category-video-actions' });
+    if (index > 0) {
+      const primary = createElement('button', { className: 'small-button principal-video', text: 'Usar como principal', type: 'button' });
+      primary.dataset.primaryCategoryMedia = item.id;
+      actions.append(primary);
+    }
+    const up = createElement('button', { className: 'small-button', text: '↑', type: 'button' });
+    up.dataset.moveCategoryMedia = item.id; up.dataset.direction = '-1'; up.disabled = index === 0;
+    const down = createElement('button', { className: 'small-button', text: '↓', type: 'button' });
+    down.dataset.moveCategoryMedia = item.id; down.dataset.direction = '1'; down.disabled = index === state.categoryMedia.length - 1;
+    const save = createElement('button', { className: 'small-button', text: 'Guardar', type: 'button' });
+    save.dataset.saveCategoryMedia = item.id;
+    const remove = createElement('button', { className: 'small-button remove', text: 'Quitar', type: 'button' });
+    remove.dataset.removeCategoryMedia = item.id;
+    actions.append(up, down, save, remove);
+    card.append(frame, field, actions); grid.append(card);
+  });
+}
+
+async function loadCategoryMedia() {
+  const data = await api(`/api/admin/categories/${state.categoryMediaId}/media`);
+  state.categoryMedia = data.media;
+  $('.category-media-heading', categoryMediaDialog).replaceChildren(
+    createElement('h2', { text: `Videos · ${data.category.name}` }),
+    createElement('p', { text: data.category.slug === 'packs-completos'
+      ? 'El primero controla el video del inicio. Todos se publican en la presentación de Packs completos.'
+      : 'El primero será el video destacado cuando esta categoría tenga su página pública.' }),
+  );
+  renderCategoryMedia();
+}
+
+async function openCategoryMedia(category) {
+  if (!category) return;
+  state.categoryMediaId = category.id;
+  $('.category-media-heading', categoryMediaDialog).replaceChildren(createElement('h2', { text: `Videos · ${category.name}` }));
+  $('.category-media-grid', categoryMediaDialog).replaceChildren(createElement('div', { className: 'media-empty', text: 'Cargando videos…' }));
+  $('.category-media-files', categoryMediaDialog).value = '';
+  $('.category-media-status', categoryMediaDialog).textContent = 'Videos MP4, WebM o MOV de máximo 100 MB. Se optimizan automáticamente.';
+  categoryMediaDialog.showModal();
+  try { await loadCategoryMedia(); }
+  catch (error) { $('.category-media-status', categoryMediaDialog).textContent = error.message; }
+}
+
+async function uploadSelectedCategoryMedia() {
+  const input = $('.category-media-files', categoryMediaDialog);
+  const files = [...input.files];
+  const button = $('.upload-category-media', categoryMediaDialog);
+  const allowed = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
+  if (!files.length) return toast('Selecciona al menos un video.', 'error');
+  if (files.some((file) => !allowed.has(file.type) || file.size <= 0 || file.size > 100 * 1024 * 1024)) {
+    return toast('Cada archivo debe ser MP4, WebM o MOV y pesar máximo 100 MB.', 'error');
+  }
+  try {
+    button.disabled = true; input.disabled = true;
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      $('.category-media-status', categoryMediaDialog).textContent = `Subiendo y optimizando ${index + 1} de ${files.length}: ${file.name}. Puede tardar unos minutos.`;
+      const alt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
+      const response = await fetch(`/api/admin/categories/${state.categoryMediaId}/media`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': file.type, 'X-Media-Alt': encodeURIComponent(alt) },
+        credentials: 'same-origin', body: file,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `No fue posible subir ${file.name}.`);
+    }
+    input.value = '';
+    await loadCategoryMedia();
+    await loadCatalog();
+    $('.category-media-status', categoryMediaDialog).textContent = 'Videos optimizados y publicados. La tienda ya usa los cambios.';
+    toast('Videos de la categoría actualizados automáticamente.');
+  } catch (error) {
+    $('.category-media-status', categoryMediaDialog).textContent = error.message;
+    toast(error.message, 'error');
+  } finally {
+    button.disabled = false; input.disabled = false;
+  }
+}
+
+async function saveCategoryMedia(mediaId) {
+  const input = $(`[data-category-media-alt="${mediaId}"]`, categoryMediaDialog);
+  try {
+    await api(`/api/admin/categories/${state.categoryMediaId}/media/${mediaId}`, {
+      method: 'PATCH', body: JSON.stringify({ altText: input.value.trim() }),
+    });
+    await loadCategoryMedia();
+    toast('Descripción del video guardada.');
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+async function reorderCategoryMedia(reordered, message) {
+  await Promise.all(reordered.map((item, index) => api(
+    `/api/admin/categories/${state.categoryMediaId}/media/${item.id}`,
+    { method: 'PATCH', body: JSON.stringify({ sortOrder: index * 10 }) },
+  )));
+  await loadCategoryMedia();
+  toast(message);
+}
+
+async function moveCategoryMedia(mediaId, direction) {
+  const currentIndex = state.categoryMedia.findIndex((item) => item.id === mediaId);
+  const targetIndex = currentIndex + direction;
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= state.categoryMedia.length) return;
+  const reordered = [...state.categoryMedia];
+  [reordered[currentIndex], reordered[targetIndex]] = [reordered[targetIndex], reordered[currentIndex]];
+  try { await reorderCategoryMedia(reordered, 'Orden de videos actualizado.'); }
+  catch (error) { toast(error.message, 'error'); }
+}
+
+async function makeCategoryMediaPrimary(mediaId) {
+  const selected = state.categoryMedia.find((item) => item.id === mediaId);
+  if (!selected) return;
+  const reordered = [selected, ...state.categoryMedia.filter((item) => item.id !== mediaId)];
+  try { await reorderCategoryMedia(reordered, 'Video principal actualizado en la tienda.'); }
+  catch (error) { toast(error.message, 'error'); }
+}
+
+async function removeCategoryMedia(mediaId) {
+  try {
+    await api(`/api/admin/categories/${state.categoryMediaId}/media/${mediaId}`, { method: 'DELETE' });
+    await loadCategoryMedia();
+    await loadCatalog();
+    toast('Video retirado de la categoría.');
+  } catch (error) { toast(error.message, 'error'); }
+}
+
 function orderStatusBadge(order) {
   return createElement('span', {
     className: `status order-${order.status}`,
@@ -1024,6 +1227,7 @@ function renderCategories() {
     identity.append(
       createElement('strong', { text: category.name }),
       createElement('small', { text: category.slug }),
+      createElement('small', { text: `${category.videoCount ?? 0} video(s) de sección` }),
     );
     appendCell(row, identity);
 
@@ -1048,6 +1252,8 @@ function renderCategories() {
     appendCell(row, formatDateTime(category.updatedAt), 'category-date');
 
     const actions = createElement('div', { className: 'actions category-actions' });
+    const videos = createElement('button', { className: 'small-button category-videos-button', text: 'Videos', type: 'button' });
+    videos.dataset.categoryMedia = category.id;
     const products = createElement('button', { className: 'small-button', text: 'Ver productos', type: 'button' });
     products.dataset.categoryProducts = category.id;
     const edit = createElement('button', { className: 'small-button', text: 'Editar', type: 'button' });
@@ -1059,7 +1265,7 @@ function renderCategories() {
     });
     if (category.isActive) visibility.dataset.categoryDeactivate = category.id;
     else visibility.dataset.categoryActivate = category.id;
-    actions.append(products, edit, visibility);
+    actions.append(videos, products, edit, visibility);
     appendCell(row, actions);
     body.append(row);
   }
@@ -1113,11 +1319,16 @@ async function saveCategory(event) {
 }
 
 async function handleCategoryAction(event) {
+  const mediaButton = event.target.closest('[data-category-media]');
   const productsButton = event.target.closest('[data-category-products]');
   const editButton = event.target.closest('[data-category-edit]');
   const deactivateButton = event.target.closest('[data-category-deactivate]');
   const activateButton = event.target.closest('[data-category-activate]');
 
+  if (mediaButton) {
+    openCategoryMedia(state.categories.find((item) => item.id === mediaButton.dataset.categoryMedia));
+    return;
+  }
   if (productsButton) {
     const category = state.categories.find((item) => item.id === productsButton.dataset.categoryProducts);
     if (!category) return;
@@ -1373,6 +1584,7 @@ $('.prices-body').addEventListener('click', async (event) => {
 
 initializeMediaInterface();
 initializeCategoriesInterface();
+initializeCategoryMediaInterface();
 initializeOrdersInterface();
 initializeUsersInterface();
 $('.product-search').addEventListener('input', renderProducts);

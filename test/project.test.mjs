@@ -49,6 +49,7 @@ const productMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migra
 const sharedMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060001_shared_product_media.sql'), 'utf8');
 const welcomeDiscountMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060003_newsletter_welcome_discounts.sql'), 'utf8');
 const adminOrderActionsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060002_admin_order_actions.sql'), 'utf8');
+const categoryVideosMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060004_category_videos.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -353,6 +354,25 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(server, /const primaryImage = media\.find\(\(item\) => item\.type === 'image'\)/);
   assert.match(server, /imagePath: storefrontImage/);
   assert.equal((server.match(/response\.set\('Cache-Control', 'no-store, max-age=0'\);/g) ?? []).length >= 2, true);
+});
+
+test('category videos are administrator-managed and drive public storefront sections', () => {
+  assert.match(categoryVideosMigration, /create table public\.category_media/);
+  assert.match(categoryVideosMigration, /alter table public\.category_media enable row level security/);
+  assert.match(categoryVideosMigration, /create policy category_media_public_select/);
+  assert.match(categoryVideosMigration, /create policy category_media_admin_all/);
+  assert.match(categoryVideosMigration, /assets\/hero\.mp4/);
+  assert.match(server, /app\.get\('\/api\/categories\/:slug\/media'/);
+  assert.match(server, /app\.get\('\/api\/admin\/categories\/:categoryId\/media'/);
+  assert.match(server, /app\.post\(\s*'\/api\/admin\/categories\/:categoryId\/media'/);
+  assert.match(server, /category_media_video_optimization_failed/);
+  assert.match(adminScript, /dataset\.categoryMedia = category\.id/);
+  assert.match(adminScript, /makeCategoryMediaPrimary/);
+  assert.match(adminScript, /uploadSelectedCategoryMedia/);
+  assert.match(html, /id="homeHeroVideo"/);
+  assert.match(html, /loadCategoryHero\(\)/);
+  assert.match(packsCollectionScript, /categoryMediaResponse/);
+  assert.match(packsCollectionScript, /renderShowcase\(ordered, state\.categoryMedia\)/);
 });
 
 test('admin access is enforced by confirmed Supabase identity, backend role checks, and RLS', () => {

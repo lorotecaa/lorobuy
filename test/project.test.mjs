@@ -339,6 +339,8 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(server, /'-c', 'copy'/);
   assert.match(server, /MAX_REMUX_ONLY_VIDEO_BYTES/);
   assert.match(server, /force_original_aspect_ratio=decrease,fps=30/);
+  assert.match(server, /'-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1'/);
+  assert.match(server, /'-preset', 'ultrafast'/);
   assert.match(server, /video_faststart_remux_failed/);
   assert.match(server, /'-movflags', '\+faststart'/);
   assert.match(server, /MAX_OPTIMIZED_VIDEO_BYTES/);

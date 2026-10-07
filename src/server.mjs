@@ -391,11 +391,12 @@ async function optimizeUploadedVideo(body, extension) {
     }
     await runFfmpeg([
       '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+      '-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1',
       '-i', inputPath,
       '-map', '0:v:0', '-map', '0:a?',
       '-vf', "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,fps=30",
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21',
-      '-maxrate', '2800k', '-bufsize', '5600k',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '20',
+      '-maxrate', '4200k', '-bufsize', '8400k',
       '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '96k',

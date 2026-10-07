@@ -153,7 +153,7 @@
         </div>
         <div class="cta-row"><a class="btn green" href="/collections/packs-completos">Ver packs completos</a><a class="btn outline" href="#catalogo">Ver todo el catálogo</a></div><p class="note">Listas para TikTok LIVE Studio y OBS. Fondo transparente.</p>
       </div>
-      <div class="phone-wrap reveal"><div class="phone"><video id="homeHeroVideo" src="assets/hero.mp4?v=20261005-stream-1" autoplay muted loop playsinline preload="metadata" poster="assets/genio.webp" disablepictureinpicture></video><span class="live-tag">LIVE</span></div></div>
+      <div class="phone-wrap reveal"><div class="phone"><video id="homeHeroVideo" src="assets/hero.mp4?v=20261005-stream-1" autoplay muted loop playsinline preload="auto" poster="assets/genio.webp" disablepictureinpicture></video><span class="live-tag">LIVE</span></div></div>
     </div></section>
 
     <section class="section" id="animaciones"><div class="shell"><div class="head-row reveal"><h2 class="section-title">Elige tu animación</h2><p>Encuentra el efecto para cada momento de tu live.</p></div><div class="category-grid">
@@ -275,7 +275,8 @@
       try{
         const response=await fetch('/api/categories/packs-completos/media',{headers:{Accept:'application/json'},credentials:'same-origin'});if(!response.ok)return;
         const data=await response.json(),primary=Array.isArray(data.media)?data.media.find(item=>item.type==='video'):null,video=document.querySelector('#homeHeroVideo');if(!primary?.url||!video)return;
-        const source=safeVideo(primary.url);if(video.getAttribute('src')===source)return;video.src=source;video.load();video.play().catch(()=>{});
+        const source=safeVideo(primary.url);video.muted=true;video.defaultMuted=true;video.autoplay=true;video.loop=true;video.preload='auto';
+        const play=()=>video.play().catch(()=>{});video.addEventListener('canplay',play);if(video.getAttribute('src')!==source){video.src=source;video.load()}play();
       }catch{}
     }
     async function loadCart(){try{const response=await fetch('/api/cart',{headers:{Accept:'application/json'},credentials:'same-origin'});if(response.ok){const {cart}=await response.json();setCartCount(cart.itemCount)}}catch{}}

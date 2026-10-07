@@ -337,6 +337,8 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.equal(packageJson.dependencies['ffmpeg-static'], '^5.3.0');
   assert.match(server, /optimizeUploadedVideo/);
   assert.match(server, /'-c', 'copy'/);
+  assert.match(server, /MAX_REMUX_ONLY_VIDEO_BYTES/);
+  assert.match(server, /force_original_aspect_ratio=decrease,fps=30/);
   assert.match(server, /video_faststart_remux_failed/);
   assert.match(server, /'-movflags', '\+faststart'/);
   assert.match(server, /MAX_OPTIMIZED_VIDEO_BYTES/);
@@ -375,6 +377,8 @@ test('category videos are administrator-managed and drive public storefront sect
   assert.match(html, /loadCategoryHero\(\)/);
   assert.match(packsCollectionScript, /categoryMediaResponse/);
   assert.match(packsCollectionScript, /renderShowcase\(ordered, state\.categoryMedia\)/);
+  assert.match(packsCollectionScript, /categoryMedia\[index\] \?\? productVideoSources\(product\)\[0\]/);
+  assert.match(html, /id="homeHeroVideo"[^>]+preload="auto"/);
 });
 
 test('admin access is enforced by confirmed Supabase identity, backend role checks, and RLS', () => {

@@ -176,6 +176,10 @@ const PRIMARY_ADMIN_EMAIL = 'loroteca98@gmail.com';
 const MEDIA_ASSET_VERSION = '20261005-stream-1';
 const MAX_PRODUCT_MEDIA_BYTES = 100 * 1024 * 1024;
 const MAX_OPTIMIZED_VIDEO_BYTES = 30 * 1024 * 1024;
+// Files above this size are transcoded even when they are already MP4. A short
+// 1080p/60 recording can stay below the delivery cap while still carrying a
+// bitrate that is too high for reliable storefront autoplay.
+const MAX_REMUX_ONLY_VIDEO_BYTES = 10 * 1024 * 1024;
 const PRODUCT_MEDIA_MIME_TYPES = new Map([
   ['image/jpeg', { type: 'image', extension: 'jpg' }],
   ['image/png', { type: 'image', extension: 'png' }],
@@ -377,7 +381,7 @@ async function optimizeUploadedVideo(body, extension) {
           outputPath,
         ]);
         const remuxed = await fsPromises.readFile(outputPath);
-        if (remuxed.length > 0 && remuxed.length <= MAX_OPTIMIZED_VIDEO_BYTES) return remuxed;
+        if (remuxed.length > 0 && remuxed.length <= MAX_REMUX_ONLY_VIDEO_BYTES) return remuxed;
       } catch (error) {
         console.warn(JSON.stringify({
           level: 'warn', event: 'video_faststart_remux_failed',
@@ -389,7 +393,7 @@ async function optimizeUploadedVideo(body, extension) {
       '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
       '-i', inputPath,
       '-map', '0:v:0', '-map', '0:a?',
-      '-vf', "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease",
+      '-vf', "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,fps=30",
       '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21',
       '-maxrate', '2800k', '-bufsize', '5600k',
       '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',

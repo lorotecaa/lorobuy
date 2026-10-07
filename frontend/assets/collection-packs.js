@@ -250,9 +250,13 @@ function renderShowcase(products, categoryMedia = []) {
   showcaseActiveVideo?.pause();
   showcaseActiveVideo = null;
   showcase.replaceChildren();
-  const entries = categoryMedia.length
-    ? categoryMedia.slice(0, 4).map((media, index) => ({ media, product: products[index % Math.max(products.length, 1)] }))
-    : products.slice(0, 4).map((product) => ({ product, media: productVideoSources(product)[0] }));
+  // Category videos enhance the showcase; they must never replace product
+  // cards. Keeping products as the source of truth means adding or removing a
+  // section video cannot make the other featured packs disappear.
+  const entries = products.slice(0, 4).map((product, index) => ({
+    product,
+    media: categoryMedia[index] ?? productVideoSources(product)[0],
+  }));
   for (const entry of entries) {
     const product = entry.product;
     const link = element('a', { className: 'showcase-item' });
@@ -272,7 +276,7 @@ function renderShowcase(products, categoryMedia = []) {
     video.preload = 'none';
     video.disablePictureInPicture = true;
     video.setAttribute('aria-hidden', 'true');
-    const source = categoryMedia.length ? { url: entry.media?.url, label: entry.media?.altText } : entry.media;
+    const source = entry.media ? { url: entry.media.url, label: entry.media.altText || entry.media.label } : null;
     if (source) video.dataset.source = safeVideo(source.url);
     link.append(image, video, element('span', { className: 'showcase-live', text: 'En vivo' }), element('span', { className: 'showcase-name', text: source?.label || product?.name || 'Packs completos' }));
     showcase.append(link);

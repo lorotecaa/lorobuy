@@ -360,6 +360,7 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(adminHtml, /assets\/ffmpeg\/ffmpeg\.js\?v=0\.12\.15/);
   assert.match(adminHtml, /admin\.js\?v=20261007-trusted-worker-5/);
   assert.match(server, /path\.basename\(filePath\) === 'admin\.js'/);
+  assert.match(server, /script-src 'self' 'wasm-unsafe-eval'/);
   assert.match(adminScript, /SAFE_STORAGE_FILE_BYTES = 46_000_000/);
   assert.match(adminScript, /optimizeLargeVideo/);
   assert.match(adminScript, /window\.FFmpegWASM\.FFmpeg/);

@@ -1776,7 +1776,7 @@ app.use('/assets', express.static(ASSET_DIR, {
     response.set('X-Content-Type-Options', 'nosniff');
     const ffmpegAssetDirectory = `${path.join(ASSET_DIR, 'ffmpeg')}${path.sep}`;
     if (path.resolve(filePath).startsWith(ffmpegAssetDirectory)) {
-      response.set('Content-Security-Policy', "default-src 'none'; script-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'");
+      response.set('Content-Security-Policy', "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'");
     }
     if (path.basename(filePath) === 'admin.js' || path.basename(filePath) === 'admin-media.css') {
       response.set('Cache-Control', 'private, no-store, max-age=0');

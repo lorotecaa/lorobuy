@@ -59,6 +59,7 @@ const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml, {
   imageSources: [config.supabaseUrl],
   mediaSources: [config.supabaseUrl],
   connectSources: [config.supabaseUrl],
+  allowSameOriginWorkers: true,
 });
 const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
 const publicSupabase = createPublicSupabase(config);

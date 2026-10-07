@@ -29,10 +29,19 @@ for (const video of checkedVideos) {
 
 await fs.rm(stagingDirectory, { recursive: true, force: true });
 await fs.cp(sourceDirectory, stagingDirectory, { recursive: true, force: true });
+const ffmpegAssetDirectory = path.join(stagingDirectory, 'assets', 'ffmpeg');
+await fs.mkdir(ffmpegAssetDirectory, { recursive: true });
+await Promise.all([
+  fs.copyFile(path.join(root, 'node_modules', '@ffmpeg', 'ffmpeg', 'dist', 'umd', 'ffmpeg.js'), path.join(ffmpegAssetDirectory, 'ffmpeg.js')),
+  fs.copyFile(path.join(root, 'node_modules', '@ffmpeg', 'ffmpeg', 'dist', 'umd', '814.ffmpeg.js'), path.join(ffmpegAssetDirectory, '814.ffmpeg.js')),
+  fs.copyFile(path.join(root, 'node_modules', '@ffmpeg', 'core', 'dist', 'umd', 'ffmpeg-core.js'), path.join(ffmpegAssetDirectory, 'ffmpeg-core.js')),
+  fs.copyFile(path.join(root, 'node_modules', '@ffmpeg', 'core', 'dist', 'umd', 'ffmpeg-core.wasm'), path.join(ffmpegAssetDirectory, 'ffmpeg-core.wasm')),
+]);
 await requirePath(path.join(stagingDirectory, 'index.html'), 'Generated frontend entry point');
 await requirePath(path.join(stagingDirectory, 'product.html'), 'Generated product page entry point');
 await requirePath(path.join(stagingDirectory, 'collection-packs.html'), 'Generated packs collection page entry point');
 await requirePath(path.join(stagingDirectory, 'assets'), 'Generated frontend assets directory');
+await requirePath(path.join(ffmpegAssetDirectory, 'ffmpeg-core.wasm'), 'Bundled browser video optimizer');
 
 await fs.rm(outputDirectory, { recursive: true, force: true });
 await fs.rename(stagingDirectory, outputDirectory);

@@ -17,6 +17,7 @@ export function buildContentSecurityPolicy(html, {
   imageSources = [],
   mediaSources = [],
   connectSources = [],
+  allowSameOriginWorkers = false,
 } = {}) {
   const styleHash = sha256(firstInlineTag(html, 'style'));
   const scriptHash = sha256(firstInlineTag(html, 'script'));
@@ -39,7 +40,7 @@ export function buildContentSecurityPolicy(html, {
     "form-action 'self'",
     "frame-ancestors 'none'",
     "frame-src 'none'",
-    "worker-src 'none'",
+    `worker-src ${allowSameOriginWorkers ? "'self'" : "'none'"}`,
     "manifest-src 'none'",
     "require-trusted-types-for 'script'",
     "trusted-types 'none'",

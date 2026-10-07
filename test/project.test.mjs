@@ -357,13 +357,19 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(adminScript, /uploadSelectedMedia/);
   assert.match(adminScript, /uploadMediaDirectly/);
   assert.doesNotMatch(adminScript, /100 \* 1024 \* 1024/);
-  assert.match(adminHtml, /admin\.js\?v=20261007-auto-prepare-3/);
+  assert.match(adminHtml, /assets\/ffmpeg\/ffmpeg\.js\?v=0\.12\.15/);
+  assert.match(adminHtml, /admin\.js\?v=20261007-ffmpeg-4/);
   assert.match(server, /path\.basename\(filePath\) === 'admin\.js'/);
   assert.match(adminScript, /SAFE_STORAGE_FILE_BYTES = 46_000_000/);
   assert.match(adminScript, /optimizeLargeVideo/);
-  assert.match(adminScript, /videoBitsPerSecond/);
+  assert.match(adminScript, /window\.FFmpegWASM\.FFmpeg/);
+  assert.match(adminScript, /ffmpeg\.ffprobe/);
+  assert.match(adminScript, /'libx264'/);
   assert.match(adminScript, /optimizeLargeImage/);
   assert.match(adminScript, /prepareFileForStorage/);
+  assert.equal(packageJson.dependencies['@ffmpeg/ffmpeg'], '0.12.15');
+  assert.equal(packageJson.dependencies['@ffmpeg/core'], '0.12.10');
+  assert.equal(fs.existsSync(path.join(root, 'dist', 'assets', 'ffmpeg', 'ffmpeg-core.wasm')), true);
   assert.match(adminScript, /moveMedia/);
   assert.match(adminScript, /removeMedia/);
   assert.match(server, /const primaryImage = media\.find\(\(item\) => item\.type === 'image'\)/);
@@ -480,6 +486,7 @@ test('all referenced local assets exist', () => {
   const references = [...`${html}\n${productHtml}\n${packsCollectionHtml}\n${adminHtml}`.matchAll(/(?:src|href)="\/?(assets\/[^"]+)"/g)].map((match) => match[1]);
   for (const reference of references) {
     const assetPath = reference.split(/[?#]/, 1)[0];
-    assert.equal(fs.existsSync(path.join(root, 'frontend', assetPath)), true, reference);
+    const assetRoot = assetPath.startsWith('assets/ffmpeg/') ? 'dist' : 'frontend';
+    assert.equal(fs.existsSync(path.join(root, assetRoot, assetPath)), true, reference);
   }
 });

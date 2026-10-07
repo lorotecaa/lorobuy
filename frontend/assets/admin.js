@@ -111,101 +111,66 @@ async function uploadMediaDirectly(baseUrl, file, altText) {
   });
 }
 
-function waitForMediaEvent(element, successEvent) {
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      element.removeEventListener(successEvent, onSuccess);
-      element.removeEventListener('error', onError);
-    };
-    const onSuccess = () => { cleanup(); resolve(); };
-    const onError = () => { cleanup(); reject(new Error('El navegador no pudo leer este archivo multimedia.')); };
-    element.addEventListener(successEvent, onSuccess, { once: true });
-    element.addEventListener('error', onError, { once: true });
-  });
-}
-
 async function optimizeLargeVideo(file, report) {
-  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
-    throw new Error('Este navegador no permite preparar videos grandes. Abre el panel en Chrome o Edge actualizado.');
-  }
-  const supportedMime = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm',
-  ].find((mime) => MediaRecorder.isTypeSupported(mime));
-  if (!supportedMime) throw new Error('El navegador no ofrece un codificador de video compatible.');
-
-  const objectUrl = URL.createObjectURL(file);
-  const video = document.createElement('video');
-  video.src = objectUrl;
-  video.preload = 'auto';
-  video.muted = true;
-  video.playsInline = true;
-  video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:.01;pointer-events:none;left:-2px;bottom:0';
-  document.body.append(video);
+  if (!window.FFmpegWASM?.FFmpeg) throw new Error('El optimizador de video no pudo cargarse. Recarga el panel e inténtalo otra vez.');
+  const ffmpeg = new window.FFmpegWASM.FFmpeg();
+  const extension = file.name.match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase() || 'mp4';
+  const inputName = `input-${Date.now()}.${extension}`;
+  const outputName = `output-${Date.now()}.mp4`;
+  const durationName = `duration-${Date.now()}.txt`;
+  const progressHandler = ({ progress }) => {
+    const percent = Math.min(99, Math.max(0, Math.round(Number(progress || 0) * 100)));
+    report(`Preparando ${file.name}: ${percent}% · el archivo original no se modifica.`);
+  };
+  ffmpeg.on('progress', progressHandler);
   try {
-    await waitForMediaEvent(video, 'loadedmetadata');
-    const duration = Number(video.duration);
-    if (!Number.isFinite(duration) || duration <= 0 || !video.videoWidth || !video.videoHeight) {
-      throw new Error('No fue posible leer la duración o resolución del video.');
-    }
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const context = canvas.getContext('2d', { alpha: false });
-    if (!context) throw new Error('No fue posible preparar el video en este navegador.');
-
-    const canvasStream = canvas.captureStream(30);
-    const sourceStream = typeof video.captureStream === 'function' ? video.captureStream() : null;
-    const audioTracks = sourceStream?.getAudioTracks?.() ?? [];
-    audioTracks.forEach((track) => canvasStream.addTrack(track));
-    const audioBitsPerSecond = audioTracks.length ? 96_000 : 0;
-    const totalBitsPerSecond = Math.floor((SAFE_STORAGE_FILE_BYTES * 8 * 0.9) / duration);
-    const videoBitsPerSecond = Math.max(120_000, totalBitsPerSecond - audioBitsPerSecond);
-    const recorder = new MediaRecorder(canvasStream, {
-      mimeType: supportedMime,
-      videoBitsPerSecond,
-      ...(audioBitsPerSecond ? { audioBitsPerSecond } : {}),
+    report(`Cargando el optimizador para ${file.name}…`);
+    await ffmpeg.load({
+      coreURL: '/assets/ffmpeg/ffmpeg-core.js',
+      wasmURL: '/assets/ffmpeg/ffmpeg-core.wasm',
     });
-    const chunks = [];
-    recorder.addEventListener('dataavailable', (event) => {
-      if (event.data?.size) chunks.push(event.data);
-    });
-    const stopped = waitForMediaEvent(recorder, 'stop');
-    const ended = waitForMediaEvent(video, 'ended');
-    let frameRequest;
-    const paintFrame = () => {
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const percent = Math.min(99, Math.round((video.currentTime / duration) * 100));
-      report(`Preparando ${file.name}: ${percent}% · se conserva ${canvas.width}×${canvas.height} y la duración completa.`);
-      if (!video.ended) {
-        frameRequest = typeof video.requestVideoFrameCallback === 'function'
-          ? video.requestVideoFrameCallback(paintFrame)
-          : requestAnimationFrame(paintFrame);
+    report(`Leyendo ${file.name} sin depender del códec del navegador…`);
+    await ffmpeg.writeFile(inputName, new Uint8Array(await file.arrayBuffer()));
+    const probeCode = await ffmpeg.ffprobe([
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', inputName, '-o', durationName,
+    ]);
+    if (probeCode !== 0) throw new Error('FFmpeg no pudo reconocer el contenido del video.');
+    const durationData = await ffmpeg.readFile(durationName);
+    const duration = Number.parseFloat(new TextDecoder().decode(durationData));
+    if (!Number.isFinite(duration) || duration <= 0) throw new Error('No fue posible obtener la duración del video.');
+    let targetVideoKbps = Math.max(80, Math.floor((((SAFE_STORAGE_FILE_BYTES * 8 * 0.84) / duration) - 96_000) / 1_000));
+    targetVideoKbps = Math.min(8_000, targetVideoKbps);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      report(`Preparando ${file.name} con FFmpeg…`);
+      const result = await ffmpeg.exec([
+        '-i', inputName,
+        '-map', '0:v:0', '-map', '0:a?',
+        '-vf', "scale=w='if(gte(iw,ih),min(1920,iw),min(1080,iw))':h='if(gte(iw,ih),min(1080,ih),min(1920,ih))':force_original_aspect_ratio=decrease",
+        '-c:v', 'libx264', '-preset', 'ultrafast',
+        '-b:v', `${targetVideoKbps}k`, '-maxrate', `${targetVideoKbps}k`, '-bufsize', `${targetVideoKbps * 2}k`,
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '96k',
+        '-movflags', '+faststart',
+        outputName,
+      ]);
+      if (result !== 0) throw new Error('FFmpeg no pudo convertir este video.');
+      const output = await ffmpeg.readFile(outputName);
+      if (output.length > 0 && output.length <= SAFE_STORAGE_FILE_BYTES) {
+        return new File([output], file.name.replace(/\.[^.]+$/, '') + '-web.mp4', {
+          type: 'video/mp4', lastModified: file.lastModified,
+        });
       }
-    };
-    recorder.start(1_000);
-    paintFrame();
-    await video.play();
-    await ended;
-    recorder.stop();
-    await stopped;
-    if (typeof video.cancelVideoFrameCallback === 'function' && frameRequest) video.cancelVideoFrameCallback(frameRequest);
-    else if (frameRequest) cancelAnimationFrame(frameRequest);
-    canvasStream.getTracks().forEach((track) => track.stop());
-    const blob = new Blob(chunks, { type: 'video/webm' });
-    if (!blob.size || blob.size > SAFE_STORAGE_FILE_BYTES) {
-      throw new Error('El navegador no consiguió reducir el video al máximo permitido por Supabase Free.');
+      await ffmpeg.deleteFile(outputName).catch(() => {});
+      targetVideoKbps = Math.max(60, Math.floor(targetVideoKbps * 0.68));
     }
-    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '-web.webm', {
-      type: 'video/webm', lastModified: file.lastModified,
-    });
+    throw new Error('El video sigue superando la capacidad de Supabase después de tres intentos.');
   } finally {
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
-    video.remove();
-    URL.revokeObjectURL(objectUrl);
+    ffmpeg.off('progress', progressHandler);
+    for (const temporaryFile of [inputName, outputName, durationName]) {
+      await ffmpeg.deleteFile(temporaryFile).catch(() => {});
+    }
+    ffmpeg.terminate();
   }
 }
 

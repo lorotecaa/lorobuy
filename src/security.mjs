@@ -16,6 +16,7 @@ export function buildContentSecurityPolicy(html, {
   allowSameOriginStyles = false,
   imageSources = [],
   mediaSources = [],
+  connectSources = [],
 } = {}) {
   const styleHash = sha256(firstInlineTag(html, 'style'));
   const scriptHash = sha256(firstInlineTag(html, 'script'));
@@ -32,7 +33,7 @@ export function buildContentSecurityPolicy(html, {
     `img-src 'self' data: ${imageSources.join(' ')}`.trim(),
     "font-src 'self'",
     `media-src 'self' ${mediaSources.join(' ')}`.trim(),
-    "connect-src 'self'",
+    `connect-src 'self' ${connectSources.join(' ')}`.trim(),
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",

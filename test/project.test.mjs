@@ -50,6 +50,7 @@ const sharedMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrat
 const welcomeDiscountMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060003_newsletter_welcome_discounts.sql'), 'utf8');
 const adminOrderActionsMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060002_admin_order_actions.sql'), 'utf8');
 const categoryVideosMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060004_category_videos.sql'), 'utf8');
+const unlimitedMediaMigration = fs.readFileSync(path.join(root, 'supabase', 'migrations', '202610060005_unlimited_direct_media_uploads.sql'), 'utf8');
 
 test('production configuration requires HTTPS origins and Supabase URL', () => {
   const config = loadConfig({
@@ -334,19 +335,18 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(productMediaMigration, /file_size_limit = excluded\.file_size_limit/);
   assert.match(sharedMediaMigration, /drop constraint if exists product_media_storage_path_key/);
   assert.match(sharedMediaMigration, /product_media_storage_path_idx/);
-  assert.equal(packageJson.dependencies['ffmpeg-static'], '^5.3.0');
-  assert.match(server, /optimizeUploadedVideo/);
-  assert.match(server, /'-c', 'copy'/);
-  assert.match(server, /MAX_REMUX_ONLY_VIDEO_BYTES/);
-  assert.match(server, /force_original_aspect_ratio=decrease,fps=30/);
-  assert.match(server, /'-threads', '1', '-filter_threads', '1', '-filter_complex_threads', '1'/);
-  assert.match(server, /'-preset', 'ultrafast'/);
-  assert.match(server, /video_faststart_remux_failed/);
-  assert.match(server, /'-movflags', '\+faststart'/);
-  assert.match(server, /MAX_OPTIMIZED_VIDEO_BYTES/);
+  assert.equal(packageJson.dependencies['ffmpeg-static'], undefined);
+  assert.match(server, /createSignedUploadUrl/);
+  assert.match(server, /verifiedStorageByteSize/);
+  assert.match(server, /media\/upload-intent/);
+  assert.match(server, /media\/complete/);
+  assert.doesNotMatch(server, /MAX_PRODUCT_MEDIA_BYTES|optimizeUploadedVideo/);
+  assert.match(unlimitedMediaMigration, /set file_size_limit = null/);
+  assert.match(unlimitedMediaMigration, /check \(byte_size is null or byte_size >= 0\)/);
   assert.match(server, /product_media_reference_check_failed/);
   assert.match(server, /app\.get\('\/api\/admin\/products\/:productId\/media'/);
-  assert.match(server, /app\.post\(\s*'\/api\/admin\/products\/:productId\/media'/);
+  assert.match(server, /app\.post\('\/api\/admin\/products\/:productId\/media\/upload-intent'/);
+  assert.match(server, /app\.post\('\/api\/admin\/products\/:productId\/media\/complete'/);
   assert.match(server, /app\.patch\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
   assert.match(server, /app\.delete\('\/api\/admin\/products\/:productId\/media\/:mediaId'/);
   assert.match(adminScript, /dataset\.media = product\.id/);
@@ -355,6 +355,8 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(adminScript, /Imagen · portada/);
   assert.match(adminScript, /image\/jpeg,image\/png,image\/webp,image\/gif/);
   assert.match(adminScript, /uploadSelectedMedia/);
+  assert.match(adminScript, /uploadMediaDirectly/);
+  assert.doesNotMatch(adminScript, /100 \* 1024 \* 1024/);
   assert.match(adminScript, /moveMedia/);
   assert.match(adminScript, /removeMedia/);
   assert.match(server, /const primaryImage = media\.find\(\(item\) => item\.type === 'image'\)/);
@@ -370,8 +372,8 @@ test('category videos are administrator-managed and drive public storefront sect
   assert.match(categoryVideosMigration, /assets\/hero\.mp4/);
   assert.match(server, /app\.get\('\/api\/categories\/:slug\/media'/);
   assert.match(server, /app\.get\('\/api\/admin\/categories\/:categoryId\/media'/);
-  assert.match(server, /app\.post\(\s*'\/api\/admin\/categories\/:categoryId\/media'/);
-  assert.match(server, /category_media_video_optimization_failed/);
+  assert.match(server, /app\.post\('\/api\/admin\/categories\/:categoryId\/media\/upload-intent'/);
+  assert.match(server, /app\.post\('\/api\/admin\/categories\/:categoryId\/media\/complete'/);
   assert.match(adminScript, /dataset\.categoryMedia = category\.id/);
   assert.match(adminScript, /makeCategoryMediaPrimary/);
   assert.match(adminScript, /uploadSelectedCategoryMedia/);

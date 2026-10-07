@@ -1324,7 +1324,7 @@ create table public.product_media (
   ),
   media_type text not null check (media_type in ('image', 'video')),
   mime_type text not null check (char_length(mime_type) between 1 and 100),
-  byte_size bigint check (byte_size is null or byte_size between 0 and 104857600),
+  byte_size bigint check (byte_size is null or byte_size >= 0),
   alt_text text check (alt_text is null or char_length(alt_text) <= 180),
   sort_order integer not null default 0 check (sort_order >= 0),
   is_active boolean not null default true,
@@ -1370,7 +1370,7 @@ with check ((select public.is_admin()));
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
-  'product-media', 'product-media', true, 104857600,
+  'product-media', 'product-media', true, null,
   array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','video/quicktime']
 )
 on conflict (id) do update
@@ -1423,7 +1423,7 @@ create table public.category_media (
   ),
   media_type text not null default 'video' check (media_type = 'video'),
   mime_type text not null check (mime_type in ('video/mp4', 'video/webm', 'video/quicktime')),
-  byte_size bigint check (byte_size is null or byte_size between 0 and 104857600),
+  byte_size bigint check (byte_size is null or byte_size >= 0),
   alt_text text check (alt_text is null or char_length(alt_text) <= 180),
   sort_order integer not null default 0 check (sort_order between 0 and 100000),
   is_active boolean not null default true,

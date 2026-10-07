@@ -82,6 +82,34 @@ async function api(url, options = {}) {
   return data;
 }
 
+async function uploadMediaDirectly(baseUrl, file, altText) {
+  const { upload } = await api(`${baseUrl}/upload-intent`, {
+    method: 'POST',
+    body: JSON.stringify({ mimeType: file.type, byteSize: file.size, altText }),
+  });
+  const form = new FormData();
+  form.append('cacheControl', '31536000');
+  form.append('', file);
+  const storageResponse = await fetch(upload.signedUrl, {
+    method: 'PUT',
+    headers: { Accept: 'application/json', 'x-upsert': 'false' },
+    body: form,
+  });
+  const storageResult = await storageResponse.json().catch(() => ({}));
+  if (!storageResponse.ok) {
+    throw new Error(storageResult.message || storageResult.error || `Supabase no pudo almacenar ${file.name}.`);
+  }
+  return api(`${baseUrl}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({
+      storagePath: upload.storagePath,
+      mimeType: upload.mimeType,
+      byteSize: upload.byteSize,
+      altText: upload.altText,
+    }),
+  });
+}
+
 let toastTimer;
 function toast(message, type = 'success') {
   const element = $('.toast');
@@ -458,7 +486,7 @@ function initializeMediaInterface() {
   );
   body.append(
     upload,
-    createElement('p', { className: 'media-upload-status', text: 'Imágenes o videos de máximo 100 MB por archivo.' }),
+    createElement('p', { className: 'media-upload-status', text: 'Subida directa: conserva el peso, calidad, bitrate y duración originales.' }),
     createElement('div', { className: 'media-grid' }),
   );
   const foot = createElement('div', { className: 'modal-foot' });
@@ -517,7 +545,7 @@ function initializeCategoryMediaInterface() {
   body.append(
     notice,
     upload,
-    createElement('p', { className: 'category-media-status media-upload-status', text: 'Videos MP4, WebM o MOV de máximo 100 MB por archivo.' }),
+    createElement('p', { className: 'category-media-status media-upload-status', text: 'Subida directa: conserva el peso, calidad, bitrate y duración originales.' }),
     createElement('div', { className: 'category-media-grid media-grid' }),
   );
   const foot = createElement('div', { className: 'modal-foot' });
@@ -735,7 +763,7 @@ async function openMedia(product) {
   $('.media-heading').replaceChildren(createElement('h2', { text: `Contenido · ${product.name}` }));
   $('.media-grid').replaceChildren(createElement('div', { className: 'media-empty', text: 'Cargando contenido…' }));
   $('.media-files').value = '';
-  $('.media-upload-status').textContent = 'Imágenes o videos de máximo 100 MB. La primera imagen será la portada; los videos se optimizan automáticamente.';
+  $('.media-upload-status').textContent = 'Sin límite artificial de LoroBuy. La primera imagen será la portada; el archivo original se conserva.';
   mediaDialog.showModal();
   try { await loadProductMedia(); }
   catch (error) { $('.media-upload-status').textContent = error.message; }
@@ -747,29 +775,20 @@ async function uploadSelectedMedia() {
   const button = $('.upload-media');
   const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'video/mp4', 'video/webm', 'video/quicktime']);
   if (!files.length) return toast('Selecciona al menos una imagen o video.', 'error');
-  if (files.some((file) => !allowed.has(file.type) || file.size <= 0 || file.size > 100 * 1024 * 1024)) {
-    return toast('Cada archivo debe ser una imagen o video válido de máximo 100 MB.', 'error');
+  if (files.some((file) => !allowed.has(file.type) || file.size <= 0)) {
+    return toast('Cada archivo debe ser una imagen o video válido.', 'error');
   }
   try {
     button.disabled = true; input.disabled = true;
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
-      $('.media-upload-status').textContent = file.type.startsWith('video/')
-        ? `Subiendo y optimizando ${index + 1} de ${files.length}: ${file.name}. Puede tardar unos minutos.`
-        : `Subiendo ${index + 1} de ${files.length}: ${file.name}`;
+      $('.media-upload-status').textContent = `Subiendo directamente a Supabase ${index + 1} de ${files.length}: ${file.name}. No cierres esta ventana.`;
       const alt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
-      const response = await fetch(`/api/admin/products/${state.mediaProductId}/media`, {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': file.type, 'X-Media-Alt': encodeURIComponent(alt) },
-        credentials: 'same-origin',
-        body: file,
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || `No fue posible subir ${file.name}.`);
+      await uploadMediaDirectly(`/api/admin/products/${state.mediaProductId}/media`, file, alt);
     }
     input.value = '';
     await loadProductMedia();
-    $('.media-upload-status').textContent = 'Contenido optimizado y publicado. La tienda se actualizará automáticamente.';
+    $('.media-upload-status').textContent = 'Contenido original publicado. La tienda se actualizó automáticamente.';
     toast('Contenido actualizado en el panel y en la tienda pública.');
   } catch (error) {
     $('.media-upload-status').textContent = error.message;
@@ -873,7 +892,7 @@ async function openCategoryMedia(category) {
   $('.category-media-heading', categoryMediaDialog).replaceChildren(createElement('h2', { text: `Videos · ${category.name}` }));
   $('.category-media-grid', categoryMediaDialog).replaceChildren(createElement('div', { className: 'media-empty', text: 'Cargando videos…' }));
   $('.category-media-files', categoryMediaDialog).value = '';
-  $('.category-media-status', categoryMediaDialog).textContent = 'Videos MP4, WebM o MOV de máximo 100 MB. Se optimizan automáticamente.';
+  $('.category-media-status', categoryMediaDialog).textContent = 'Sin límite artificial de LoroBuy. Se conserva la calidad, bitrate y duración originales.';
   categoryMediaDialog.showModal();
   try { await loadCategoryMedia(); }
   catch (error) { $('.category-media-status', categoryMediaDialog).textContent = error.message; }
@@ -885,27 +904,21 @@ async function uploadSelectedCategoryMedia() {
   const button = $('.upload-category-media', categoryMediaDialog);
   const allowed = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
   if (!files.length) return toast('Selecciona al menos un video.', 'error');
-  if (files.some((file) => !allowed.has(file.type) || file.size <= 0 || file.size > 100 * 1024 * 1024)) {
-    return toast('Cada archivo debe ser MP4, WebM o MOV y pesar máximo 100 MB.', 'error');
+  if (files.some((file) => !allowed.has(file.type) || file.size <= 0)) {
+    return toast('Cada archivo debe ser un video MP4, WebM o MOV válido.', 'error');
   }
   try {
     button.disabled = true; input.disabled = true;
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
-      $('.category-media-status', categoryMediaDialog).textContent = `Subiendo y optimizando ${index + 1} de ${files.length}: ${file.name}. Puede tardar unos minutos.`;
+      $('.category-media-status', categoryMediaDialog).textContent = `Subiendo directamente a Supabase ${index + 1} de ${files.length}: ${file.name}. No cierres esta ventana.`;
       const alt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
-      const response = await fetch(`/api/admin/categories/${state.categoryMediaId}/media`, {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': file.type, 'X-Media-Alt': encodeURIComponent(alt) },
-        credentials: 'same-origin', body: file,
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || `No fue posible subir ${file.name}.`);
+      await uploadMediaDirectly(`/api/admin/categories/${state.categoryMediaId}/media`, file, alt);
     }
     input.value = '';
     await loadCategoryMedia();
     await loadCatalog();
-    $('.category-media-status', categoryMediaDialog).textContent = 'Videos optimizados y publicados. La tienda ya usa los cambios.';
+    $('.category-media-status', categoryMediaDialog).textContent = 'Videos originales publicados. La tienda ya usa los cambios.';
     toast('Videos de la categoría actualizados automáticamente.');
   } catch (error) {
     $('.category-media-status', categoryMediaDialog).textContent = error.message;

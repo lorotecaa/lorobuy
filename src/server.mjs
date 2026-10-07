@@ -60,6 +60,7 @@ const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml, {
   mediaSources: [config.supabaseUrl],
   connectSources: [config.supabaseUrl],
   allowSameOriginWorkers: true,
+  trustedTypePolicies: ['lorobuy-ffmpeg'],
 });
 const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
 const publicSupabase = createPublicSupabase(config);
@@ -1773,6 +1774,10 @@ app.use('/assets', express.static(ASSET_DIR, {
   maxAge: '1d',
   setHeaders(response, filePath) {
     response.set('X-Content-Type-Options', 'nosniff');
+    const ffmpegAssetDirectory = `${path.join(ASSET_DIR, 'ffmpeg')}${path.sep}`;
+    if (path.resolve(filePath).startsWith(ffmpegAssetDirectory)) {
+      response.set('Content-Security-Policy', "default-src 'none'; script-src 'self'; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'");
+    }
     if (path.basename(filePath) === 'admin.js' || path.basename(filePath) === 'admin-media.css') {
       response.set('Cache-Control', 'private, no-store, max-age=0');
     }

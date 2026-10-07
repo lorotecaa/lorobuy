@@ -33,6 +33,30 @@ const orderStatusLabels = {
   draft: 'Borrador', pending: 'Pendiente', completed: 'Pagado', cancelled: 'Cancelado', refunded: 'Reembolsado',
 };
 const SAFE_STORAGE_FILE_BYTES = 46_000_000;
+let ffmpegTrustedScriptPolicy;
+
+function temporarilyAllowLocalFfmpegWorker() {
+  if (!window.trustedTypes) return () => {};
+  ffmpegTrustedScriptPolicy ??= window.trustedTypes.createPolicy('lorobuy-ffmpeg', {
+    createScriptURL(value) {
+      const url = new URL(String(value), window.location.origin);
+      if (url.origin !== window.location.origin || !url.pathname.startsWith('/assets/ffmpeg/')) {
+        throw new TypeError('El optimizador intentó abrir un proceso fuera de los recursos locales permitidos.');
+      }
+      return url.href;
+    },
+  });
+  const NativeWorker = window.Worker;
+  class LocalFfmpegWorker extends NativeWorker {
+    constructor(scriptUrl, options) {
+      super(ffmpegTrustedScriptPolicy.createScriptURL(String(scriptUrl)), options);
+    }
+  }
+  window.Worker = LocalFfmpegWorker;
+  return () => {
+    if (window.Worker === LocalFfmpegWorker) window.Worker = NativeWorker;
+  };
+}
 
 function createElement(tag, { className, text, type } = {}) {
   const element = document.createElement(tag);
@@ -114,6 +138,7 @@ async function uploadMediaDirectly(baseUrl, file, altText) {
 async function optimizeLargeVideo(file, report) {
   if (!window.FFmpegWASM?.FFmpeg) throw new Error('El optimizador de video no pudo cargarse. Recarga el panel e inténtalo otra vez.');
   const ffmpeg = new window.FFmpegWASM.FFmpeg();
+  let restoreWorker = () => {};
   const extension = file.name.match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase() || 'mp4';
   const inputName = `input-${Date.now()}.${extension}`;
   const outputName = `output-${Date.now()}.mp4`;
@@ -125,10 +150,13 @@ async function optimizeLargeVideo(file, report) {
   ffmpeg.on('progress', progressHandler);
   try {
     report(`Cargando el optimizador para ${file.name}…`);
+    restoreWorker = temporarilyAllowLocalFfmpegWorker();
     await ffmpeg.load({
       coreURL: '/assets/ffmpeg/ffmpeg-core.js',
       wasmURL: '/assets/ffmpeg/ffmpeg-core.wasm',
     });
+    restoreWorker();
+    restoreWorker = () => {};
     report(`Leyendo ${file.name} sin depender del códec del navegador…`);
     await ffmpeg.writeFile(inputName, new Uint8Array(await file.arrayBuffer()));
     const probeCode = await ffmpeg.ffprobe([
@@ -166,6 +194,7 @@ async function optimizeLargeVideo(file, report) {
     }
     throw new Error('El video sigue superando la capacidad de Supabase después de tres intentos.');
   } finally {
+    restoreWorker();
     ffmpeg.off('progress', progressHandler);
     for (const temporaryFile of [inputName, outputName, durationName]) {
       await ffmpeg.deleteFile(temporaryFile).catch(() => {});

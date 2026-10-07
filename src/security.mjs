@@ -18,6 +18,7 @@ export function buildContentSecurityPolicy(html, {
   mediaSources = [],
   connectSources = [],
   allowSameOriginWorkers = false,
+  trustedTypePolicies = [],
 } = {}) {
   const styleHash = sha256(firstInlineTag(html, 'style'));
   const scriptHash = sha256(firstInlineTag(html, 'script'));
@@ -43,7 +44,7 @@ export function buildContentSecurityPolicy(html, {
     `worker-src ${allowSameOriginWorkers ? "'self'" : "'none'"}`,
     "manifest-src 'none'",
     "require-trusted-types-for 'script'",
-    "trusted-types 'none'",
+    `trusted-types ${trustedTypePolicies.length ? trustedTypePolicies.join(' ') : "'none'"}`,
     'upgrade-insecure-requests',
   ].join('; ');
 }

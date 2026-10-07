@@ -32,6 +32,7 @@ const formatDateTime = (value) => value ? new Intl.DateTimeFormat('es-CO', {
 const orderStatusLabels = {
   draft: 'Borrador', pending: 'Pendiente', completed: 'Pagado', cancelled: 'Cancelado', refunded: 'Reembolsado',
 };
+const SAFE_STORAGE_FILE_BYTES = 46_000_000;
 
 function createElement(tag, { className, text, type } = {}) {
   const element = document.createElement(tag);
@@ -108,6 +109,136 @@ async function uploadMediaDirectly(baseUrl, file, altText) {
       altText: upload.altText,
     }),
   });
+}
+
+function waitForMediaEvent(element, successEvent) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      element.removeEventListener(successEvent, onSuccess);
+      element.removeEventListener('error', onError);
+    };
+    const onSuccess = () => { cleanup(); resolve(); };
+    const onError = () => { cleanup(); reject(new Error('El navegador no pudo leer este archivo multimedia.')); };
+    element.addEventListener(successEvent, onSuccess, { once: true });
+    element.addEventListener('error', onError, { once: true });
+  });
+}
+
+async function optimizeLargeVideo(file, report) {
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+    throw new Error('Este navegador no permite preparar videos grandes. Abre el panel en Chrome o Edge actualizado.');
+  }
+  const supportedMime = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+  ].find((mime) => MediaRecorder.isTypeSupported(mime));
+  if (!supportedMime) throw new Error('El navegador no ofrece un codificador de video compatible.');
+
+  const objectUrl = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.src = objectUrl;
+  video.preload = 'auto';
+  video.muted = true;
+  video.playsInline = true;
+  video.style.cssText = 'position:fixed;width:1px;height:1px;opacity:.01;pointer-events:none;left:-2px;bottom:0';
+  document.body.append(video);
+  try {
+    await waitForMediaEvent(video, 'loadedmetadata');
+    const duration = Number(video.duration);
+    if (!Number.isFinite(duration) || duration <= 0 || !video.videoWidth || !video.videoHeight) {
+      throw new Error('No fue posible leer la duración o resolución del video.');
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d', { alpha: false });
+    if (!context) throw new Error('No fue posible preparar el video en este navegador.');
+
+    const canvasStream = canvas.captureStream(30);
+    const sourceStream = typeof video.captureStream === 'function' ? video.captureStream() : null;
+    const audioTracks = sourceStream?.getAudioTracks?.() ?? [];
+    audioTracks.forEach((track) => canvasStream.addTrack(track));
+    const audioBitsPerSecond = audioTracks.length ? 96_000 : 0;
+    const totalBitsPerSecond = Math.floor((SAFE_STORAGE_FILE_BYTES * 8 * 0.9) / duration);
+    const videoBitsPerSecond = Math.max(120_000, totalBitsPerSecond - audioBitsPerSecond);
+    const recorder = new MediaRecorder(canvasStream, {
+      mimeType: supportedMime,
+      videoBitsPerSecond,
+      ...(audioBitsPerSecond ? { audioBitsPerSecond } : {}),
+    });
+    const chunks = [];
+    recorder.addEventListener('dataavailable', (event) => {
+      if (event.data?.size) chunks.push(event.data);
+    });
+    const stopped = waitForMediaEvent(recorder, 'stop');
+    const ended = waitForMediaEvent(video, 'ended');
+    let frameRequest;
+    const paintFrame = () => {
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const percent = Math.min(99, Math.round((video.currentTime / duration) * 100));
+      report(`Preparando ${file.name}: ${percent}% · se conserva ${canvas.width}×${canvas.height} y la duración completa.`);
+      if (!video.ended) {
+        frameRequest = typeof video.requestVideoFrameCallback === 'function'
+          ? video.requestVideoFrameCallback(paintFrame)
+          : requestAnimationFrame(paintFrame);
+      }
+    };
+    recorder.start(1_000);
+    paintFrame();
+    await video.play();
+    await ended;
+    recorder.stop();
+    await stopped;
+    if (typeof video.cancelVideoFrameCallback === 'function' && frameRequest) video.cancelVideoFrameCallback(frameRequest);
+    else if (frameRequest) cancelAnimationFrame(frameRequest);
+    canvasStream.getTracks().forEach((track) => track.stop());
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    if (!blob.size || blob.size > SAFE_STORAGE_FILE_BYTES) {
+      throw new Error('El navegador no consiguió reducir el video al máximo permitido por Supabase Free.');
+    }
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '-web.webm', {
+      type: 'video/webm', lastModified: file.lastModified,
+    });
+  } finally {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    video.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function optimizeLargeImage(file, report) {
+  if (!window.createImageBitmap) throw new Error('Este navegador no permite preparar imágenes grandes.');
+  report(`Preparando ${file.name} para Supabase Free…`);
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d', { alpha: true });
+    if (!context) throw new Error('No fue posible preparar la imagen.');
+    context.drawImage(bitmap, 0, 0);
+    for (const quality of [0.92, 0.82, 0.7, 0.55]) {
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', quality));
+      if (blob?.size && blob.size <= SAFE_STORAGE_FILE_BYTES) {
+        return new File([blob], file.name.replace(/\.[^.]+$/, '') + '-web.webp', {
+          type: 'image/webp', lastModified: file.lastModified,
+        });
+      }
+    }
+    throw new Error('La imagen supera la capacidad de Supabase incluso después de prepararla.');
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function prepareFileForStorage(file, report) {
+  if (file.size <= SAFE_STORAGE_FILE_BYTES) return file;
+  return file.type.startsWith('video/')
+    ? optimizeLargeVideo(file, report)
+    : optimizeLargeImage(file, report);
 }
 
 let toastTimer;
@@ -782,9 +913,10 @@ async function uploadSelectedMedia() {
     button.disabled = true; input.disabled = true;
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
-      $('.media-upload-status').textContent = `Subiendo directamente a Supabase ${index + 1} de ${files.length}: ${file.name}. No cierres esta ventana.`;
+      const preparedFile = await prepareFileForStorage(file, (message) => { $('.media-upload-status').textContent = message; });
+      $('.media-upload-status').textContent = `Subiendo directamente a Supabase ${index + 1} de ${files.length}: ${preparedFile.name}. No cierres esta ventana.`;
       const alt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
-      await uploadMediaDirectly(`/api/admin/products/${state.mediaProductId}/media`, file, alt);
+      await uploadMediaDirectly(`/api/admin/products/${state.mediaProductId}/media`, preparedFile, alt);
     }
     input.value = '';
     await loadProductMedia();
@@ -911,9 +1043,12 @@ async function uploadSelectedCategoryMedia() {
     button.disabled = true; input.disabled = true;
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
-      $('.category-media-status', categoryMediaDialog).textContent = `Subiendo directamente a Supabase ${index + 1} de ${files.length}: ${file.name}. No cierres esta ventana.`;
+      const preparedFile = await prepareFileForStorage(file, (message) => {
+        $('.category-media-status', categoryMediaDialog).textContent = message;
+      });
+      $('.category-media-status', categoryMediaDialog).textContent = `Subiendo directamente a Supabase ${index + 1} de ${files.length}: ${preparedFile.name}. No cierres esta ventana.`;
       const alt = file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').trim();
-      await uploadMediaDirectly(`/api/admin/categories/${state.categoryMediaId}/media`, file, alt);
+      await uploadMediaDirectly(`/api/admin/categories/${state.categoryMediaId}/media`, preparedFile, alt);
     }
     input.value = '';
     await loadCategoryMedia();

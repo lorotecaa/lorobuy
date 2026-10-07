@@ -336,6 +336,8 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(sharedMediaMigration, /product_media_storage_path_idx/);
   assert.equal(packageJson.dependencies['ffmpeg-static'], '^5.3.0');
   assert.match(server, /optimizeUploadedVideo/);
+  assert.match(server, /'-c', 'copy'/);
+  assert.match(server, /video_faststart_remux_failed/);
   assert.match(server, /'-movflags', '\+faststart'/);
   assert.match(server, /MAX_OPTIMIZED_VIDEO_BYTES/);
   assert.match(server, /product_media_reference_check_failed/);

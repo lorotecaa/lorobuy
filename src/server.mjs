@@ -366,6 +366,25 @@ async function optimizeUploadedVideo(body, extension) {
   const outputPath = path.join(temporaryDirectory, 'optimized.mp4');
   try {
     await fsPromises.writeFile(inputPath, body, { flag: 'wx' });
+    if (extension === 'mp4') {
+      try {
+        await runFfmpeg([
+          '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+          '-i', inputPath,
+          '-map', '0:v:0', '-map', '0:a?',
+          '-c', 'copy',
+          '-movflags', '+faststart',
+          outputPath,
+        ]);
+        const remuxed = await fsPromises.readFile(outputPath);
+        if (remuxed.length > 0 && remuxed.length <= MAX_OPTIMIZED_VIDEO_BYTES) return remuxed;
+      } catch (error) {
+        console.warn(JSON.stringify({
+          level: 'warn', event: 'video_faststart_remux_failed',
+          message: error?.message ?? 'Unknown remux error',
+        }));
+      }
+    }
     await runFfmpeg([
       '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
       '-i', inputPath,

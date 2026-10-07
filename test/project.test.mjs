@@ -379,6 +379,7 @@ test('category videos are administrator-managed and drive public storefront sect
   assert.match(packsCollectionScript, /renderShowcase\(ordered, state\.categoryMedia\)/);
   assert.match(packsCollectionScript, /categoryMedia\[index\] \?\? productVideoSources\(product\)\[0\]/);
   assert.match(html, /id="homeHeroVideo"[^>]+preload="auto"/);
+  assert.match(html, /id="homeHeroVideo"[^>]+crossorigin="anonymous"/);
 });
 
 test('admin access is enforced by confirmed Supabase identity, backend role checks, and RLS', () => {

@@ -376,7 +376,9 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   const pageResponse = await fetch(`${appOrigin}/`);
   assert.equal(pageResponse.status, 200);
   assert.match(await pageResponse.text(), /<title>Lorobuy<\/title>/);
-  assert.match(pageResponse.headers.get('content-security-policy') ?? '', /connect-src 'self'/);
+  const storefrontPolicy = pageResponse.headers.get('content-security-policy') ?? '';
+  assert.match(storefrontPolicy, /connect-src 'self'/);
+  assert.match(storefrontPolicy, new RegExp(`img-src 'self' data: http:\\/\\/127\\.0\\.0\\.1:${supabasePort}`));
   assert.equal(pageResponse.headers.get('x-frame-options'), 'DENY');
 
   const healthResponse = await fetch(`${appOrigin}/api/health`);

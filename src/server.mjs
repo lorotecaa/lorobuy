@@ -41,6 +41,7 @@ const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
 const config = loadConfig();
 const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml, {
+  imageSources: [config.supabaseUrl],
   mediaSources: [config.supabaseUrl],
 });
 const productContentSecurityPolicy = buildContentSecurityPolicy(productHtml, {

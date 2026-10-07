@@ -1770,8 +1770,11 @@ app.use('/assets', express.static(ASSET_DIR, {
   immutable: false,
   index: false,
   maxAge: '1d',
-  setHeaders(response) {
+  setHeaders(response, filePath) {
     response.set('X-Content-Type-Options', 'nosniff');
+    if (path.basename(filePath) === 'admin.js' || path.basename(filePath) === 'admin-media.css') {
+      response.set('Cache-Control', 'private, no-store, max-age=0');
+    }
   },
 }));
 

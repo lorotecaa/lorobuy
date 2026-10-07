@@ -357,6 +357,8 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(adminScript, /uploadSelectedMedia/);
   assert.match(adminScript, /uploadMediaDirectly/);
   assert.doesNotMatch(adminScript, /100 \* 1024 \* 1024/);
+  assert.match(adminHtml, /admin\.js\?v=20261007-direct-uploads-2/);
+  assert.match(server, /path\.basename\(filePath\) === 'admin\.js'/);
   assert.match(adminScript, /moveMedia/);
   assert.match(adminScript, /removeMedia/);
   assert.match(server, /const primaryImage = media\.find\(\(item\) => item\.type === 'image'\)/);

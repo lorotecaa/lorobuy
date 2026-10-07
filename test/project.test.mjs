@@ -358,7 +358,7 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(adminScript, /uploadMediaDirectly/);
   assert.doesNotMatch(adminScript, /100 \* 1024 \* 1024/);
   assert.match(adminHtml, /assets\/ffmpeg\/ffmpeg\.js\?v=0\.12\.15/);
-  assert.match(adminHtml, /admin\.js\?v=20261007-trusted-worker-5/);
+  assert.match(adminHtml, /admin\.js\?v=20261007-probe-result-7/);
   assert.match(server, /path\.basename\(filePath\) === 'admin\.js'/);
   assert.match(server, /script-src 'self' 'wasm-unsafe-eval'/);
   assert.match(adminScript, /SAFE_STORAGE_FILE_BYTES = 46_000_000/);
@@ -367,6 +367,7 @@ test('every product has an administrator-managed image and video gallery', () =>
   assert.match(adminScript, /createPolicy\('lorobuy-ffmpeg'/);
   assert.match(adminScript, /url\.pathname\.startsWith\('\/assets\/ffmpeg\/'\)/);
   assert.match(adminScript, /ffmpeg\.ffprobe/);
+  assert.doesNotMatch(adminScript, /probeCode !== 0/);
   assert.match(adminScript, /'libx264'/);
   assert.match(adminScript, /optimizeLargeImage/);
   assert.match(adminScript, /prepareFileForStorage/);

@@ -159,11 +159,10 @@ async function optimizeLargeVideo(file, report) {
     restoreWorker = () => {};
     report(`Leyendo ${file.name} sin depender del códec del navegador…`);
     await ffmpeg.writeFile(inputName, new Uint8Array(await file.arrayBuffer()));
-    const probeCode = await ffmpeg.ffprobe([
+    await ffmpeg.ffprobe([
       '-v', 'error', '-show_entries', 'format=duration',
       '-of', 'default=noprint_wrappers=1:nokey=1', inputName, '-o', durationName,
     ]);
-    if (probeCode !== 0) throw new Error('FFmpeg no pudo reconocer el contenido del video.');
     const durationData = await ffmpeg.readFile(durationName);
     const duration = Number.parseFloat(new TextDecoder().decode(durationData));
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('No fue posible obtener la duración del video.');

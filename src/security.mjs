@@ -56,7 +56,9 @@ export function requireSameOrigin(config) {
     if (safeMethods.has(request.method)) return next();
 
     const origin = request.get('origin');
-    if (origin === config.appOrigin || (config.nodeEnv !== 'production' && !origin)) {
+    const host = request.get('host');
+    const servedOrigin = host ? `${request.protocol}://${host}` : null;
+    if (origin === config.appOrigin || origin === servedOrigin || (config.nodeEnv !== 'production' && !origin)) {
       return next();
     }
 

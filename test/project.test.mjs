@@ -11,7 +11,7 @@ import {
   parseLemonSqueezyWebhook,
   verifyLemonSqueezySignature,
 } from '../src/payments.mjs';
-import { buildContentSecurityPolicy } from '../src/security.mjs';
+import { buildContentSecurityPolicy, requireSameOrigin } from '../src/security.mjs';
 import {
   assertHighDefinitionDimensions,
   inspectMp4Delivery,
@@ -111,6 +111,38 @@ test('CSP allows only the same-origin API and hashed inline code', () => {
   assert.doesNotMatch(adminPolicy, /'unsafe-inline'/);
   assert.doesNotMatch(authConfirmPolicy, /'unsafe-inline'/);
   assert.doesNotMatch(authResetPolicy, /'unsafe-inline'/);
+});
+
+test('same-origin protection accepts verified custom domains and rejects external sites', () => {
+  const guard = requireSameOrigin({ appOrigin: 'https://lorobuy.onrender.com', nodeEnv: 'production' });
+  const run = (origin, host = 'tienda.loroland.pro') => {
+    let nextCalled = false;
+    let statusCode = null;
+    let body = null;
+    const request = {
+      method: 'POST',
+      protocol: 'https',
+      get(name) {
+        if (name === 'origin') return origin;
+        if (name === 'host') return host;
+        return undefined;
+      },
+    };
+    const response = {
+      status(code) { statusCode = code; return this; },
+      json(value) { body = value; return this; },
+    };
+    guard(request, response, () => { nextCalled = true; });
+    return { nextCalled, statusCode, body };
+  };
+
+  assert.equal(run('https://tienda.loroland.pro').nextCalled, true);
+  assert.equal(run('https://lorobuy.onrender.com').nextCalled, true);
+  assert.deepEqual(run('https://attacker.example'), {
+    nextCalled: false,
+    statusCode: 403,
+    body: { error: 'Origen de solicitud no permitido.' },
+  });
 });
 
 test('account interface provides sign-in, registration, profile, and admin entry points', () => {

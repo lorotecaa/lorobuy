@@ -165,6 +165,9 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let signupRequestUrl;
   let resendPayload;
   let resendRequestUrl;
+  let recoveryPayload;
+  let recoveryRequestUrl;
+  let resetPasswordPayload;
   let signinPayload;
   let webhookRpcPayload;
   let adminCreatePayload;
@@ -245,6 +248,12 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify({}));
     }
+    if (request.method === 'POST' && request.url?.startsWith('/auth/v1/recover')) {
+      recoveryRequestUrl = request.url;
+      recoveryPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({}));
+    }
     if (request.method === 'POST' && request.url === '/auth/v1/token?grant_type=password') {
       signinPayload = await readJsonBody(request);
       response.setHeader('Content-Type', 'application/json');
@@ -258,15 +267,16 @@ test('Render server serves the unchanged storefront and reads catalog data from 
     }
     if (request.method === 'POST' && request.url === '/auth/v1/token?grant_type=refresh_token') {
       const payload = await readJsonBody(request);
-      if (payload.refresh_token !== 'confirmation-refresh-token') {
+      if (!['confirmation-refresh-token', 'recovery-refresh-token'].includes(payload.refresh_token)) {
         response.statusCode = 401;
         response.setHeader('Content-Type', 'application/json');
         return response.end(JSON.stringify({ message: 'invalid refresh token' }));
       }
+      const recovery = payload.refresh_token === 'recovery-refresh-token';
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify({
-        access_token: 'confirmed-access-token',
-        refresh_token: 'confirmed-refresh-token',
+        access_token: recovery ? 'recovery-access-token' : 'confirmed-access-token',
+        refresh_token: recovery ? 'recovery-session-refresh-token' : 'confirmed-refresh-token',
         expires_in: 3600,
         token_type: 'bearer',
         user: customerUser,
@@ -287,6 +297,12 @@ test('Render server serves the unchanged storefront and reads catalog data from 
       assert.equal(request.headers.apikey, 'sb_secret_mock');
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify({ user: customerUser }));
+    }
+    if (request.method === 'PUT' && request.url === '/auth/v1/user') {
+      assert.equal(request.headers.authorization, 'Bearer recovery-access-token');
+      resetPasswordPayload = await readJsonBody(request);
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify(customerUser));
     }
     if (request.url === '/auth/v1/user') {
       response.setHeader('Content-Type', 'application/json');
@@ -475,6 +491,42 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   const confirmationCookies = confirmationResponse.headers.get('set-cookie') ?? '';
   assert.match(confirmationCookies, /lorobuy_access=confirmed-access-token/);
   assert.match(confirmationCookies, /lorobuy_refresh=confirmed-refresh-token/);
+
+  const recoveryRequestResponse = await fetch(`${appOrigin}/api/auth/password-recovery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ email: 'cliente@example.com' }),
+  });
+  assert.equal(recoveryRequestResponse.status, 202);
+  assert.deepEqual(await recoveryRequestResponse.json(), { accepted: true });
+  assert.equal(recoveryPayload.email, 'cliente@example.com');
+  assert.equal(new URL(recoveryRequestUrl, appOrigin).searchParams.get('redirect_to'), `${appOrigin}/auth/reset-password`);
+
+  const resetPageResponse = await fetch(`${appOrigin}/auth/reset-password`);
+  assert.equal(resetPageResponse.status, 200);
+  assert.match(await resetPageResponse.text(), /Crea una contraseña nueva/);
+  assert.match(resetPageResponse.headers.get('content-security-policy') ?? '', /connect-src 'self'/);
+  assert.equal(resetPageResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+
+  const shortResetResponse = await fetch(`${appOrigin}/api/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ refreshToken: 'recovery-refresh-token', password: 'abcde' }),
+  });
+  assert.equal(shortResetResponse.status, 400);
+  assert.deepEqual(await shortResetResponse.json(), { error: 'La contraseña debe tener al menos 6 caracteres.' });
+
+  const resetPasswordResponse = await fetch(`${appOrigin}/api/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ refreshToken: 'recovery-refresh-token', password: 'NuevaClave123!' }),
+  });
+  assert.equal(resetPasswordResponse.status, 200);
+  assert.deepEqual(await resetPasswordResponse.json(), { updated: true, authenticated: true });
+  assert.equal(resetPasswordPayload.password, 'NuevaClave123!');
+  const resetCookies = resetPasswordResponse.headers.get('set-cookie') ?? '';
+  assert.match(resetCookies, /lorobuy_access=recovery-access-token/);
+  assert.match(resetCookies, /lorobuy_refresh=recovery-session-refresh-token/);
 
   const signinResponse = await fetch(`${appOrigin}/api/auth/signin`, {
     method: 'POST',

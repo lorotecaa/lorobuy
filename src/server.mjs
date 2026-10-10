@@ -31,7 +31,8 @@ const PRODUCT_FILE = path.join(FRONTEND_BUILD_DIR, 'product.html');
 const PACKS_COLLECTION_FILE = path.join(FRONTEND_BUILD_DIR, 'collection-packs.html');
 const ADMIN_FILE = path.join(FRONTEND_BUILD_DIR, 'admin.html');
 const AUTH_CONFIRM_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-confirm.html');
-if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(PACKS_COLLECTION_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(ASSET_DIR)) {
+const AUTH_RESET_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-reset.html');
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(PACKS_COLLECTION_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(AUTH_RESET_FILE) || !fs.existsSync(ASSET_DIR)) {
   throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
 }
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
@@ -39,6 +40,7 @@ const productHtml = fs.readFileSync(PRODUCT_FILE, 'utf8');
 const packsCollectionHtml = fs.readFileSync(PACKS_COLLECTION_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
+const authResetHtml = fs.readFileSync(AUTH_RESET_FILE, 'utf8');
 const config = loadConfig();
 const contentSecurityPolicy = buildContentSecurityPolicy(storefrontHtml, {
   imageSources: [config.supabaseUrl],
@@ -64,6 +66,7 @@ const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml, {
   trustedTypePolicies: ['lorobuy-ffmpeg'],
 });
 const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmHtml);
+const authResetContentSecurityPolicy = buildContentSecurityPolicy(authResetHtml);
 const publicSupabase = createPublicSupabase(config);
 const adminSupabase = createAdminSupabase(config);
 const app = express();
@@ -84,6 +87,8 @@ app.use((request, response, next) => {
     ? adminContentSecurityPolicy
     : request.path === '/auth/confirm'
       ? authConfirmContentSecurityPolicy
+      : request.path === '/auth/reset-password'
+        ? authResetContentSecurityPolicy
       : request.path === '/collections/packs-completos'
         ? packsCollectionContentSecurityPolicy
         : request.path.startsWith('/products/')
@@ -628,6 +633,27 @@ app.post('/api/auth/resend-confirmation', asyncRoute(async (request, response) =
   return response.status(202).json({ accepted: true });
 }));
 
+app.post('/api/auth/password-recovery', asyncRoute(async (request, response) => {
+  const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
+  if (!email || !EMAIL_PATTERN.test(email)) return response.status(400).json({ error: 'Correo electrónico no válido.' });
+
+  const { error } = await createPublicSupabase(config).auth.resetPasswordForEmail(email, {
+    redirectTo: `${config.appOrigin}/auth/reset-password`,
+  });
+  if (error && (error.status === 429 || error.code === 'over_email_send_rate_limit' || error.code === 'over_request_rate_limit')) {
+    return response.status(429).json({ error: 'Supabase alcanzó temporalmente el límite de correos. Espera antes de solicitar otro.' });
+  }
+  if (error) {
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'auth_password_recovery_failed',
+      code: error.code ?? null,
+      status: error.status ?? null,
+    }));
+  }
+  return response.status(202).json({ accepted: true });
+}));
+
 app.post('/api/auth/confirm', asyncRoute(async (request, response) => {
   const refreshToken = normalizeText(request.body?.refreshToken, 4096, { required: true });
   if (!refreshToken) return response.status(400).json({ error: 'El enlace de confirmación no es válido.' });
@@ -647,6 +673,32 @@ app.post('/api/auth/confirm', asyncRoute(async (request, response) => {
   const profile = await getSessionProfile(session);
   setSessionCookies(response, config, data.session);
   return response.json({ authenticated: true, isAdmin: profile?.role === 'admin' });
+}));
+
+app.post('/api/auth/reset-password', asyncRoute(async (request, response) => {
+  const refreshToken = normalizeText(request.body?.refreshToken, 4096, { required: true });
+  const password = normalizeText(request.body?.password, 128, { required: true });
+  if (!refreshToken) return response.status(400).json({ error: 'El enlace para restablecer la contraseña no es válido.' });
+  if (!password || password.length < MIN_PASSWORD_LENGTH) {
+    return response.status(400).json({ error: `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.` });
+  }
+
+  const publicClient = createPublicSupabase(config);
+  const { data, error } = await publicClient.auth.refreshSession({ refresh_token: refreshToken });
+  if (error || !data.session || !data.user || data.user.is_anonymous) {
+    return response.status(401).json({ error: 'El enlace venció o ya no es válido. Solicita uno nuevo.' });
+  }
+
+  const { error: updateError } = await publicClient.auth.updateUser({ password });
+  if (updateError) {
+    if (updateError.code === 'same_password') {
+      return response.status(400).json({ error: 'La nueva contraseña debe ser diferente de la anterior.' });
+    }
+    return response.status(400).json({ error: 'No fue posible actualizar la contraseña. Solicita un enlace nuevo.' });
+  }
+
+  setSessionCookies(response, config, data.session);
+  return response.json({ updated: true, authenticated: true });
 }));
 
 app.post('/api/auth/signin', asyncRoute(async (request, response) => {
@@ -1765,6 +1817,14 @@ app.get('/auth/confirm', (_request, response) => {
     'Content-Security-Policy': authConfirmContentSecurityPolicy,
   });
   response.type('html').send(authConfirmHtml);
+});
+
+app.get('/auth/reset-password', (_request, response) => {
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': authResetContentSecurityPolicy,
+  });
+  response.type('html').send(authResetHtml);
 });
 
 app.use('/assets', express.static(ASSET_DIR, {

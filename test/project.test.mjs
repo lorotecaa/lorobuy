@@ -27,11 +27,13 @@ const packsCollectionScript = fs.readFileSync(path.join(root, 'frontend', 'asset
 const adminHtml = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
 const adminScript = fs.readFileSync(path.join(root, 'frontend', 'assets', 'admin.js'), 'utf8');
 const authConfirmHtml = fs.readFileSync(path.join(root, 'frontend', 'auth-confirm.html'), 'utf8');
+const authResetHtml = fs.readFileSync(path.join(root, 'frontend', 'auth-reset.html'), 'utf8');
 const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
 const builtProductHtml = fs.readFileSync(path.join(root, 'dist', 'product.html'), 'utf8');
 const builtPacksCollectionHtml = fs.readFileSync(path.join(root, 'dist', 'collection-packs.html'), 'utf8');
 const builtAdminHtml = fs.readFileSync(path.join(root, 'dist', 'admin.html'), 'utf8');
 const builtAuthConfirmHtml = fs.readFileSync(path.join(root, 'dist', 'auth-confirm.html'), 'utf8');
+const builtAuthResetHtml = fs.readFileSync(path.join(root, 'dist', 'auth-reset.html'), 'utf8');
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
 const authSource = fs.readFileSync(path.join(root, 'src', 'auth.mjs'), 'utf8');
 const configSource = fs.readFileSync(path.join(root, 'src', 'config.mjs'), 'utf8');
@@ -93,11 +95,13 @@ test('CSP allows only the same-origin API and hashed inline code', () => {
   const productPolicy = buildContentSecurityPolicy(productHtml);
   const adminPolicy = buildContentSecurityPolicy(adminHtml);
   const authConfirmPolicy = buildContentSecurityPolicy(authConfirmHtml);
+  const authResetPolicy = buildContentSecurityPolicy(authResetHtml);
   assert.equal(policy, buildContentSecurityPolicy(html.replace(/\r\n/g, '\n')));
   assert.match(policy, /connect-src 'self'/);
   assert.match(productPolicy, /connect-src 'self'/);
   assert.match(adminPolicy, /connect-src 'self'/);
   assert.match(authConfirmPolicy, /connect-src 'self'/);
+  assert.match(authResetPolicy, /connect-src 'self'/);
   assert.match(policy, /script-src 'sha256-[^']+' 'strict-dynamic'/);
   assert.match(policy, /style-src 'sha256-[^']+'/);
   assert.match(policy, /frame-ancestors 'none'/);
@@ -106,18 +110,24 @@ test('CSP allows only the same-origin API and hashed inline code', () => {
   assert.doesNotMatch(productPolicy, /'unsafe-inline'/);
   assert.doesNotMatch(adminPolicy, /'unsafe-inline'/);
   assert.doesNotMatch(authConfirmPolicy, /'unsafe-inline'/);
+  assert.doesNotMatch(authResetPolicy, /'unsafe-inline'/);
 });
 
 test('account interface provides sign-in, registration, profile, and admin entry points', () => {
   assert.match(html, /id="accountDialog"/);
   assert.match(html, /id="signinForm"/);
   assert.match(html, /id="signupForm"/);
+  assert.match(html, /id="recoveryForm"/);
   assert.match(html, /id="profileForm"/);
   assert.match(html, /href="\/admin"/);
   assert.match(html, /apiRequest\('\/api\/auth\/session'/);
   assert.match(html, /fetch\(url/);
   assert.match(authConfirmHtml, /fetch\('\/api\/auth\/confirm'/);
+  assert.match(authResetHtml, /fetch\('\/api\/auth\/reset-password'/);
   assert.doesNotMatch(authConfirmHtml, /localStorage|sessionStorage/);
+  assert.doesNotMatch(authResetHtml, /localStorage|sessionStorage/);
+  assert.match(html, /Olvidé mi contraseña/);
+  assert.match(html, /apiRequest\('\/api\/auth\/password-recovery'/);
   assert.match(html, /minlength="6"/);
   assert.match(html, /Usa al menos 6 caracteres/);
 });
@@ -302,6 +312,17 @@ test('email confirmation uses the configured public origin and a protected callb
   assert.match(server, /app\.post\('\/api\/auth\/confirm'/);
   assert.match(server, /refreshSession\(\{ refresh_token: refreshToken \}\)/);
   assert.match(server, /app\.get\('\/auth\/confirm'/);
+});
+
+test('password recovery uses the configured public origin and a protected reset callback', () => {
+  assert.match(server, /resetPasswordForEmail\(email/);
+  assert.match(server, /redirectTo: `\$\{config\.appOrigin\}\/auth\/reset-password`/);
+  assert.match(server, /app\.post\('\/api\/auth\/password-recovery'/);
+  assert.match(server, /app\.post\('\/api\/auth\/reset-password'/);
+  assert.match(server, /app\.get\('\/auth\/reset-password'/);
+  assert.match(authResetHtml, /recoveryType!==['"]recovery['"]/);
+  assert.match(builtAuthResetHtml, /Restablecer contraseña \| LoroBuy/);
+  assert.equal(authResetHtml, builtAuthResetHtml);
 });
 
 test('payment secrets stay on the backend and never enter storefront code', () => {

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Restablecer contraseña | LoroBuy</title>
+  <link rel="icon" href="/assets/favicon.png" type="image/png">
+  <style>
+    @font-face{font-family:Inter;src:url("/assets/inter-regular.woff2") format("woff2");font-display:swap}
+    @font-face{font-family:Montserrat;src:url("/assets/montserrat-bold.woff2") format("woff2");font-weight:700;font-display:swap}
+    :root{color-scheme:dark;--bg:#09090d;--panel:#12121a;--line:#2c2d38;--text:#f8f8fb;--muted:#a8a9b6;--neon:#17e6ab;--danger:#ff5470}
+    *{box-sizing:border-box}
+    body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0,#251856 0,transparent 42%),var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}
+    main{width:min(100%,520px);padding:38px;border:1px solid var(--line);border-radius:24px;background:linear-gradient(145deg,rgba(24,24,35,.98),rgba(12,12,18,.98));box-shadow:0 24px 80px rgba(0,0,0,.48)}
+    .brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:27px;color:var(--text);font:700 18px Montserrat,sans-serif;letter-spacing:.03em;text-decoration:none}
+    .brand img{width:38px;height:38px;border-radius:10px;object-fit:cover}
+    .mark{width:58px;height:58px;margin:0 auto 21px;display:grid;place-items:center;border-radius:50%;border:1px solid rgba(23,230,171,.4);background:rgba(23,230,171,.1);color:var(--neon);font-size:26px;box-shadow:0 0 34px rgba(23,230,171,.12)}
+    h1{margin:0 0 10px;font:700 clamp(24px,6vw,34px) Montserrat,sans-serif;text-align:center}
+    .lead{min-height:48px;margin:0 0 24px;color:var(--muted);font-size:15px;line-height:1.55;text-align:center}
+    form{display:grid;gap:15px}
+    label{display:grid;gap:7px;color:#d7d4df;font-size:12px;font-weight:700}
+    input{width:100%;height:51px;border:1px solid rgba(255,255,255,.17);border-radius:11px;outline:0;background:rgba(7,6,12,.58);color:#fff;padding:0 14px;font:inherit}
+    input:focus{border-color:var(--neon);box-shadow:0 0 0 3px rgba(23,230,171,.11)}
+    button,.button{display:flex;min-height:51px;align-items:center;justify-content:center;border:0;border-radius:11px;background:var(--neon);color:#06120f;font:700 13px Montserrat,sans-serif;text-decoration:none;text-transform:uppercase;cursor:pointer}
+    button:disabled{cursor:wait;opacity:.62}
+    .message{min-height:20px;margin:16px 0 0;color:var(--muted);font-size:12px;line-height:1.5;text-align:center}
+    .message.error{color:#ff89a0}
+    .message.success{color:var(--neon)}
+    .actions{display:grid;gap:10px;margin-top:24px}
+    main.error .mark{border-color:rgba(255,84,112,.45);background:rgba(255,84,112,.1);color:var(--danger)}
+    [hidden]{display:none!important}
+    @media(max-width:560px){main{padding:31px 20px 25px}}
+  </style>
+</head>
+<body>
+  <main aria-live="polite">
+    <a class="brand" href="/"><img src="/assets/logo.png" alt="">LoroBuy</a>
+    <div class="mark" aria-hidden="true">↻</div>
+    <h1>Crea una contraseña nueva</h1>
+    <p class="lead">Escribe una contraseña que puedas recordar y que no utilices en otros sitios.</p>
+    <form id="resetForm">
+      <label>Nueva contraseña<input name="password" type="password" required minlength="6" maxlength="128" autocomplete="new-password"></label>
+      <label>Repite la contraseña<input name="confirmPassword" type="password" required minlength="6" maxlength="128" autocomplete="new-password"></label>
+      <button type="submit">Restablecer contraseña</button>
+    </form>
+    <p class="message" role="status"></p>
+    <div class="actions" hidden><a class="button" href="/?auth=recovery">Solicitar un enlace nuevo</a></div>
+  </main>
+  <script>
+    const card=document.querySelector('main'),mark=document.querySelector('.mark'),title=document.querySelector('h1'),lead=document.querySelector('.lead'),form=document.querySelector('#resetForm'),message=document.querySelector('.message'),actions=document.querySelector('.actions');
+    const hash=new URLSearchParams(location.hash.slice(1)),query=new URLSearchParams(location.search),value=name=>hash.get(name)||query.get(name);
+    const refreshToken=value('refresh_token'),recoveryType=value('type'),errorCode=value('error_code'),errorDescription=value('error_description');
+    history.replaceState({},'',location.pathname);
+    const fail=text=>{card.classList.add('error');mark.textContent='!';title.textContent='El enlace no está disponible';lead.textContent=text;form.hidden=true;message.textContent='';actions.hidden=false};
+    if(errorCode||!refreshToken||recoveryType!=='recovery'){
+      const expired=errorCode==='otp_expired'||/expired|invalid/i.test(errorDescription||'');
+      fail(expired?'El enlace venció o ya fue utilizado. Solicita uno nuevo desde el inicio de sesión.':'Este enlace para restablecer la contraseña no es válido. Solicita uno nuevo.');
+    }else{
+      form.addEventListener('submit',async event=>{
+        event.preventDefault();
+        const button=form.querySelector('button'),data=new FormData(form),password=String(data.get('password')||''),confirmation=String(data.get('confirmPassword')||'');
+        message.className='message';
+        if(password!==confirmation){message.textContent='Las contraseñas no coinciden.';message.classList.add('error');return}
+        button.disabled=true;message.textContent='Guardando tu contraseña nueva…';
+        try{
+          const response=await fetch('/api/auth/reset-password',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({refreshToken,password})});
+          const body=await response.json().catch(()=>({}));
+          if(!response.ok)throw new Error(body.error||'No fue posible actualizar la contraseña.');
+          form.reset();form.hidden=true;mark.textContent='✓';title.textContent='Contraseña actualizada';lead.textContent='Tu contraseña quedó guardada y tu sesión está lista.';message.textContent='Te llevaremos a LoroBuy…';message.className='message success';
+          setTimeout(()=>location.replace('/?notice=password-updated'),1100);
+        }catch(error){message.textContent=error.message;message.className='message error';actions.hidden=false}
+        finally{button.disabled=false}
+      });
+    }
+  </script>
+</body>
+</html>

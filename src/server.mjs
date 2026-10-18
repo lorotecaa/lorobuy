@@ -985,7 +985,11 @@ app.post('/api/contact', asyncRoute(async (request, response) => {
     await contactStore.save({ name, email, reason, orderNumber, message });
   } catch (error) {
     attempts.splice(attempts.indexOf(now), 1);
-    throw error;
+    const diagnostic = typeof error?.statusCode === 'string' && /^[a-z0-9_-]{1,50}$/i.test(error.statusCode)
+      ? error.statusCode
+      : Number.isInteger(error?.status) ? `http_${error.status}` : 'storage_unavailable';
+    console.error(JSON.stringify({ level: 'error', event: 'contact_message_storage_failed', diagnostic }));
+    return response.status(503).json({ error: 'No pudimos recibir tu mensaje. Inténtalo de nuevo en unos minutos.', diagnostic });
   }
   return response.status(201).json({ accepted: true });
 }));

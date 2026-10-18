@@ -1,43 +1,19 @@
 import crypto from 'node:crypto';
 
-const BUCKET = 'contact-messages';
+const BUCKET = 'product-files';
+const PREFIX = 'contact-messages/incoming';
 const FILE_PATTERN = /^\d{13}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i;
 
 export function createContactStore(adminSupabase) {
   if (!adminSupabase) return null;
   const storage = adminSupabase.storage.from(BUCKET);
-  let bucketReady;
-
-  async function ensureBucket() {
-    if (!bucketReady) bucketReady = (async () => {
-      const existing = await adminSupabase.storage.getBucket(BUCKET);
-      if (!existing.error) {
-        if (existing.data.public) throw new Error('Contact message bucket must be private.');
-        return;
-      }
-      if (Number(existing.error.status) !== 404) throw existing.error;
-      const created = await adminSupabase.storage.createBucket(BUCKET, {
-        public: false,
-        allowedMimeTypes: ['application/json'],
-        fileSizeLimit: 65536,
-      });
-      if (!created.error) return;
-      if (Number(created.error.status) === 409) {
-        const retried = await adminSupabase.storage.getBucket(BUCKET);
-        if (!retried.error && !retried.data.public) return;
-      }
-      throw created.error;
-    })().catch(error => { bucketReady = null; throw error; });
-    return bucketReady;
-  }
 
   return {
     async save(message) {
-      await ensureBucket();
       const filename = `${Date.now()}-${crypto.randomUUID()}.json`;
       const body = Buffer.from(JSON.stringify({ ...message, createdAt: new Date().toISOString() }), 'utf8');
-      const { error } = await storage.upload(`incoming/${filename}`, body, {
-        contentType: 'application/json',
+      const { error } = await storage.upload(`${PREFIX}/${filename}`, body, {
+        contentType: 'application/octet-stream',
         cacheControl: '0',
         upsert: false,
         metadata: { name: message.name, email: message.email, reason: message.reason },
@@ -46,8 +22,7 @@ export function createContactStore(adminSupabase) {
       return filename;
     },
     async list() {
-      await ensureBucket();
-      const { data, error } = await storage.list('incoming', {
+      const { data, error } = await storage.list(PREFIX, {
         limit: 100,
         sortBy: { column: 'name', order: 'desc' },
       });
@@ -62,8 +37,7 @@ export function createContactStore(adminSupabase) {
     },
     async read(filename) {
       if (!FILE_PATTERN.test(filename)) return null;
-      await ensureBucket();
-      const { data, error } = await storage.download(`incoming/${filename}`);
+      const { data, error } = await storage.download(`${PREFIX}/${filename}`);
       if (error) {
         if (Number(error.status) === 404) return null;
         throw error;

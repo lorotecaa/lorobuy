@@ -177,7 +177,6 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let adminUserUpdatePayload;
   let adminCancelOrderPayload;
   let adminDeleteOrderPayload;
-  let contactBucketExists = false;
   let contactUploadName;
   let contactUploadBody;
   const readJsonBody = async (request) => {
@@ -187,32 +186,15 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   };
 
   const supabaseMock = http.createServer(async (request, response) => {
-    if (request.url === '/storage/v1/bucket/contact-messages' && request.method === 'GET') {
-      assert.equal(request.headers.apikey, 'sb_secret_mock');
-      response.setHeader('Content-Type', 'application/json');
-      if (!contactBucketExists) {
-        response.statusCode = 404;
-        return response.end(JSON.stringify({ message: 'Bucket not found', statusCode: '404' }));
-      }
-      return response.end(JSON.stringify({ id: 'contact-messages', public: false }));
-    }
-    if (request.url === '/storage/v1/bucket' && request.method === 'POST') {
-      const bucket = await readJsonBody(request);
-      assert.equal(bucket.id, 'contact-messages');
-      assert.equal(bucket.public, false);
-      contactBucketExists = true;
-      response.setHeader('Content-Type', 'application/json');
-      return response.end(JSON.stringify({ name: 'contact-messages' }));
-    }
-    if (request.url?.startsWith('/storage/v1/object/contact-messages/incoming/') && request.method === 'POST') {
+    if (request.url?.startsWith('/storage/v1/object/product-files/contact-messages/incoming/') && request.method === 'POST') {
       contactUploadName = request.url.split('/').at(-1);
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
       contactUploadBody = Buffer.concat(chunks).toString();
       response.setHeader('Content-Type', 'application/json');
-      return response.end(JSON.stringify({ Key: `contact-messages/incoming/${contactUploadName}`, Id: crypto.randomUUID() }));
+      return response.end(JSON.stringify({ Key: `product-files/contact-messages/incoming/${contactUploadName}`, Id: crypto.randomUUID() }));
     }
-    if (request.url === '/storage/v1/object/list/contact-messages' && request.method === 'POST') {
+    if (request.url === '/storage/v1/object/list/product-files' && request.method === 'POST') {
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify(contactUploadName ? [{
         name: contactUploadName,
@@ -220,7 +202,7 @@ test('Render server serves the unchanged storefront and reads catalog data from 
         metadata: { name: 'Cliente prueba', email: 'contacto@example.com', reason: 'download' },
       }] : []));
     }
-    if (request.url?.startsWith('/storage/v1/object/contact-messages/incoming/') && request.method === 'GET') {
+    if (request.url?.startsWith('/storage/v1/object/product-files/contact-messages/incoming/') && request.method === 'GET') {
       response.setHeader('Content-Type', 'application/json');
       return response.end(JSON.stringify({ name: 'Cliente prueba', email: 'contacto@example.com', reason: 'download', orderNumber: '#1024', message: 'Mi descarga necesita ayuda.', createdAt: '2026-10-18T12:00:00Z' }));
     }

@@ -134,7 +134,7 @@ npm run smoke
 
 ## Contact form
 
-The public `/pages/contact` form saves each message in a private Supabase Storage bucket named `contact-messages`. The backend creates the bucket on the first valid submission using `SUPABASE_SECRET_KEY`; no SQL migration or extra service is needed. Administrators can read messages at `/admin/contact` (also linked as **Mensajes** from the admin panel) and use **Responder por correo** to reply. The site does not send an automatic email notification to the owner; the admin inbox is the delivery destination. The form has server-side validation, a honeypot, same-origin protection, and a per-IP rate limit.
+The public `/pages/contact` form saves each message under `contact-messages/incoming/` in the existing private Supabase Storage bucket `product-files`, using `SUPABASE_SECRET_KEY`; no new SQL migration or service is needed. Contact messages are not mapped to any purchased product and cannot be downloaded by customers. Administrators can read them at `/admin/contact` (also linked as **Mensajes** from the admin panel) and use **Responder por correo** to reply. The site does not send an automatic email notification to the owner; the admin inbox is the delivery destination. The form has server-side validation, a honeypot, same-origin protection, and a per-IP rate limit.
 
 ## Security notes
 

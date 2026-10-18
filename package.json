@@ -13,7 +13,7 @@
     "dev": "node --env-file-if-exists=.env --watch src/server.mjs",
     "start": "node src/server.mjs",
     "pretest": "npm run build",
-    "test": "node --test test/project.test.mjs test/server.integration.test.mjs",
+    "test": "node --test test/project.test.mjs test/server.integration.test.mjs test/contact.test.mjs",
     "smoke": "node scripts/smoke-test.mjs"
   },
   "dependencies": {

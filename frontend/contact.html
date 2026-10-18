@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Contacto | LoroBuy</title>
+  <meta name="description" content="Escríbenos si necesitas ayuda con una compra, una descarga o una animación LoroBuy.">
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="stylesheet" href="/assets/tutorial.css?v=20261017-1">
+  <link rel="stylesheet" href="/assets/contact.css?v=20261018-1">
+  <style>/* Los estilos se cargan desde archivos locales protegidos. */</style>
+</head>
+<body>
+  <div class="announce">Las mejores animaciones para tus LIVE de TikTok</div>
+  <header class="site-head">
+    <div class="shell nav">
+      <button class="menu-button" type="button" aria-label="Abrir menú" aria-controls="contactNav" aria-expanded="false">☰</button>
+      <a class="brand" href="/" aria-label="LoroBuy: ir al inicio">Loro<span>Buy</span></a>
+      <nav class="nav-links" id="contactNav" aria-label="Navegación principal">
+        <a class="packs-link" href="/collections/packs-completos">Packs completos</a>
+        <a href="/#animaciones">Animaciones</a>
+        <a href="/pages/tutorial">Tutorial</a>
+        <a href="/collections/packs-completos#productos">Catálogo</a>
+        <a class="current" href="/pages/contact" aria-current="page">Contacto</a>
+      </nav>
+      <div class="nav-tools">
+        <a class="tool-link" href="/collections/packs-completos#productos" aria-label="Buscar en el catálogo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></a>
+        <a class="tool-link" href="/?auth=signin" aria-label="Mi cuenta"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22a8 8 0 0 1 16 0"></path></svg></a>
+      </div>
+    </div>
+  </header>
+
+  <main class="contact-main">
+    <div class="shell">
+      <nav class="breadcrumbs" aria-label="Ruta"><a href="/">Inicio</a><span aria-hidden="true">/</span><span>Contacto</span></nav>
+      <div class="contact-intro"><h1>¿Tienes una duda?<br><span>Escríbenos</span></h1><p>Te ayudamos con tu compra, tu descarga o cualquier pregunta antes de elegir tu animación.</p></div>
+      <div class="contact-grid">
+        <aside class="help-list" aria-label="Ayuda rápida">
+          <article class="help-card"><span class="help-icon" aria-hidden="true">✉</span><div><h2>¿No te llegó tu correo?</h2><p>Revisa spam o promociones. El enlace de descarga llega al correo que usaste al comprar.</p></div></article>
+          <a class="help-card help-link" href="/pages/tutorial"><span class="help-icon" aria-hidden="true">▷</span><div><h2>¿Cómo las uso?</h2><p>Mira el paso a paso para TikTok LIVE Studio y OBS.</p><strong>Ver tutorial <span aria-hidden="true">→</span></strong></div></a>
+          <article class="help-card"><span class="help-icon" aria-hidden="true">◇</span><div><h2>¿Falló un archivo?</h2><p>Escríbenos con tu número de pedido y el problema. Revisaremos tu descarga y te ayudaremos a resolverlo.</p></div></article>
+          <a class="help-card help-link catalog-help" href="/collections/packs-completos"><span class="help-icon" aria-hidden="true">✦</span><div><h2>¿Aún no eliges?</h2><p>Explora las animaciones y encuentra la ideal para tu LIVE.</p><strong>Ver packs <span aria-hidden="true">→</span></strong></div></a>
+        </aside>
+        <section class="contact-card" aria-labelledby="formTitle">
+          <h2 id="formTitle">Envíanos un mensaje</h2>
+          <form id="contactForm" novalidate>
+            <div class="field-row">
+              <label>Nombre<input name="name" maxlength="100" autocomplete="name" placeholder="Tu nombre"></label>
+              <label>Correo electrónico <span>*</span><input name="email" type="email" maxlength="254" autocomplete="email" inputmode="email" required placeholder="tu@correo.com"></label>
+            </div>
+            <fieldset class="reason-options"><legend>Motivo</legend><label><input type="radio" name="reason" value="download" checked><span>Problema con mi descarga</span></label><label><input type="radio" name="reason" value="before-buying"><span>Duda antes de comprar</span></label><label><input type="radio" name="reason" value="other"><span>Otro</span></label></fieldset>
+            <label>Número de pedido (opcional)<input name="orderNumber" maxlength="100" placeholder="Ej.: #1024"></label>
+            <label>Mensaje <span>*</span><textarea name="message" minlength="10" maxlength="4000" required placeholder="Cuéntanos en qué te ayudamos"></textarea></label>
+            <div class="trap-field" aria-hidden="true"><label>No llenar<input name="website" tabindex="-1" autocomplete="off"></label></div>
+            <button class="send-button" type="submit">Enviar mensaje</button>
+            <p class="form-status" id="contactStatus" role="status" aria-live="polite">Te respondemos al correo que escribas arriba.</p>
+          </form>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <section class="contact-newsletter"><div class="shell"><h2>Suscríbete para recibir anuncios</h2><p>Sé el primero en conocer nuevas colecciones y ofertas exclusivas.</p><form id="newsletterForm"><input type="email" name="email" required maxlength="254" autocomplete="email" placeholder="Correo electrónico" aria-label="Correo electrónico"><button type="submit" aria-label="Suscribirse">→</button></form><p class="newsletter-status" role="status" aria-live="polite"></p></div></section>
+  <footer><div class="shell footer-inner"><a class="brand" href="/">Loro<span>Buy</span></a><p>Animaciones para TikTok LIVE Studio y OBS.</p><div><a href="/pages/tutorial">Tutorial</a><a href="/pages/contact">Contacto</a></div><small>© 2026 LoroBuy</small></div></footer>
+  <script>/* El comportamiento se carga desde un archivo local protegido. */</script>
+  <script src="/assets/contact.js?v=20261018-1" defer></script>
+</body>
+</html>

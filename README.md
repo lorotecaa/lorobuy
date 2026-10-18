@@ -132,6 +132,10 @@ npm run smoke
 
 `/api/health` performs a real read against the Supabase `products` table. It returns HTTP 200 with `database: "connected"` only when Render can reach Supabase and the migration/RLS grants are correct. It returns HTTP 503 otherwise.
 
+## Contact form
+
+The public `/pages/contact` form saves each message in a private Supabase Storage bucket named `contact-messages`. The backend creates the bucket on the first valid submission using `SUPABASE_SECRET_KEY`; no SQL migration or extra service is needed. Administrators can read messages at `/admin/contact` (also linked as **Mensajes** from the admin panel) and use **Responder por correo** to reply. The site does not send an automatic email notification to the owner; the admin inbox is the delivery destination. The form has server-side validation, a honeypot, same-origin protection, and a per-IP rate limit.
+
 ## Security notes
 
 - All exposed application tables have RLS enabled and explicit grants.

@@ -20,6 +20,8 @@ await requirePath(path.join(sourceDirectory, 'index.html'), 'Frontend entry poin
 await requirePath(path.join(sourceDirectory, 'product.html'), 'Product page entry point');
 await requirePath(path.join(sourceDirectory, 'collection-packs.html'), 'Packs collection page entry point');
 await requirePath(path.join(sourceDirectory, 'tutorial.html'), 'Tutorial page entry point');
+await requirePath(path.join(sourceDirectory, 'contact.html'), 'Contact page entry point');
+await requirePath(path.join(sourceDirectory, 'admin-contact.html'), 'Admin contact page entry point');
 await requirePath(path.join(sourceDirectory, 'assets'), 'Frontend assets directory');
 
 const checkedVideos = await validateStorefrontVideoQuality(sourceDirectory);
@@ -42,6 +44,8 @@ await requirePath(path.join(stagingDirectory, 'index.html'), 'Generated frontend
 await requirePath(path.join(stagingDirectory, 'product.html'), 'Generated product page entry point');
 await requirePath(path.join(stagingDirectory, 'collection-packs.html'), 'Generated packs collection page entry point');
 await requirePath(path.join(stagingDirectory, 'tutorial.html'), 'Generated tutorial page entry point');
+await requirePath(path.join(stagingDirectory, 'contact.html'), 'Generated contact page entry point');
+await requirePath(path.join(stagingDirectory, 'admin-contact.html'), 'Generated admin contact page entry point');
 await requirePath(path.join(stagingDirectory, 'assets'), 'Generated frontend assets directory');
 await requirePath(path.join(ffmpegAssetDirectory, 'ffmpeg-core.wasm'), 'Bundled browser video optimizer');
 

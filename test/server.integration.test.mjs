@@ -177,6 +177,9 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   let adminUserUpdatePayload;
   let adminCancelOrderPayload;
   let adminDeleteOrderPayload;
+  let contactBucketExists = false;
+  let contactUploadName;
+  let contactUploadBody;
   const readJsonBody = async (request) => {
     let body = '';
     for await (const chunk of request) body += chunk;
@@ -184,6 +187,43 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   };
 
   const supabaseMock = http.createServer(async (request, response) => {
+    if (request.url === '/storage/v1/bucket/contact-messages' && request.method === 'GET') {
+      assert.equal(request.headers.apikey, 'sb_secret_mock');
+      response.setHeader('Content-Type', 'application/json');
+      if (!contactBucketExists) {
+        response.statusCode = 404;
+        return response.end(JSON.stringify({ message: 'Bucket not found', statusCode: '404' }));
+      }
+      return response.end(JSON.stringify({ id: 'contact-messages', public: false }));
+    }
+    if (request.url === '/storage/v1/bucket' && request.method === 'POST') {
+      const bucket = await readJsonBody(request);
+      assert.equal(bucket.id, 'contact-messages');
+      assert.equal(bucket.public, false);
+      contactBucketExists = true;
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({ name: 'contact-messages' }));
+    }
+    if (request.url?.startsWith('/storage/v1/object/contact-messages/incoming/') && request.method === 'POST') {
+      contactUploadName = request.url.split('/').at(-1);
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      contactUploadBody = Buffer.concat(chunks).toString();
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({ Key: `contact-messages/incoming/${contactUploadName}`, Id: crypto.randomUUID() }));
+    }
+    if (request.url === '/storage/v1/object/list/contact-messages' && request.method === 'POST') {
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify(contactUploadName ? [{
+        name: contactUploadName,
+        created_at: '2026-10-18T12:00:00Z',
+        metadata: { name: 'Cliente prueba', email: 'contacto@example.com', reason: 'download' },
+      }] : []));
+    }
+    if (request.url?.startsWith('/storage/v1/object/contact-messages/incoming/') && request.method === 'GET') {
+      response.setHeader('Content-Type', 'application/json');
+      return response.end(JSON.stringify({ name: 'Cliente prueba', email: 'contacto@example.com', reason: 'download', orderNumber: '#1024', message: 'Mi descarga necesita ayuda.', createdAt: '2026-10-18T12:00:00Z' }));
+    }
     if (request.url === '/rest/v1/rpc/complete_payment_order') {
       assert.equal(request.headers.apikey, 'sb_secret_mock');
       assert.equal(request.headers.authorization, 'Bearer sb_secret_mock');
@@ -428,6 +468,44 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.match(await packsCollectionResponse.text(), /Packs completos para TikTok LIVE \| LoroBuy/);
   assert.match(packsCollectionResponse.headers.get('content-security-policy') ?? '', /script-src 'self'/);
   assert.equal(packsCollectionResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+
+  const contactPageResponse = await fetch(`${appOrigin}/pages/contact`);
+  assert.equal(contactPageResponse.status, 200);
+  assert.match(await contactPageResponse.text(), /Envíanos un mensaje/);
+  assert.match(contactPageResponse.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+  assert.equal(contactPageResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+
+  const invalidContact = await fetch(`${appOrigin}/api/contact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ email: 'no-es-correo', reason: 'download', message: 'Hola' }),
+  });
+  assert.equal(invalidContact.status, 400);
+
+  const sentContact = await fetch(`${appOrigin}/api/contact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin },
+    body: JSON.stringify({ name: 'Cliente prueba', email: 'contacto@example.com', reason: 'download', orderNumber: '#1024', message: 'Mi descarga necesita ayuda.' }),
+  });
+  assert.equal(sentContact.status, 201);
+  assert.deepEqual(await sentContact.json(), { accepted: true });
+  assert.match(contactUploadBody, /Mi descarga necesita ayuda/);
+
+  const forbiddenInbox = await fetch(`${appOrigin}/api/admin/contact-messages`);
+  assert.equal(forbiddenInbox.status, 403);
+
+  const inbox = await fetch(`${appOrigin}/api/admin/contact-messages`, { headers: { Cookie: 'lorobuy_access=admin-token' } });
+  assert.equal(inbox.status, 200);
+  const inboxItems = (await inbox.json()).messages;
+  assert.equal(inboxItems.length, 1);
+  assert.equal(inboxItems[0].email, 'contacto@example.com');
+  const receivedContact = await fetch(`${appOrigin}/api/admin/contact-messages/${inboxItems[0].id}`, { headers: { Cookie: 'lorobuy_access=admin-token' } });
+  assert.equal(receivedContact.status, 200);
+  assert.equal((await receivedContact.json()).message.orderNumber, '#1024');
+
+  const adminContactRedirect = await fetch(`${appOrigin}/admin/contact`, { redirect: 'manual' });
+  assert.equal(adminContactRedirect.status, 303);
+  assert.match(adminContactRedirect.headers.get('location') ?? '', /auth=signin/);
 
   const tutorialResponse = await fetch(`${appOrigin}/pages/tutorial`);
   assert.equal(tutorialResponse.status, 200);

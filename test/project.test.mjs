@@ -23,6 +23,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const html = fs.readFileSync(path.join(root, 'frontend', 'index.html'), 'utf8');
 const productHtml = fs.readFileSync(path.join(root, 'frontend', 'product.html'), 'utf8');
 const packsCollectionHtml = fs.readFileSync(path.join(root, 'frontend', 'collection-packs.html'), 'utf8');
+const contactHtml = fs.readFileSync(path.join(root, 'frontend', 'contact.html'), 'utf8');
+const adminContactHtml = fs.readFileSync(path.join(root, 'frontend', 'admin-contact.html'), 'utf8');
 const packsCollectionScript = fs.readFileSync(path.join(root, 'frontend', 'assets', 'collection-packs.js'), 'utf8');
 const adminHtml = fs.readFileSync(path.join(root, 'frontend', 'admin.html'), 'utf8');
 const adminScript = fs.readFileSync(path.join(root, 'frontend', 'assets', 'admin.js'), 'utf8');
@@ -31,6 +33,8 @@ const authResetHtml = fs.readFileSync(path.join(root, 'frontend', 'auth-reset.ht
 const builtHtml = fs.readFileSync(path.join(root, 'dist', 'index.html'), 'utf8');
 const builtProductHtml = fs.readFileSync(path.join(root, 'dist', 'product.html'), 'utf8');
 const builtPacksCollectionHtml = fs.readFileSync(path.join(root, 'dist', 'collection-packs.html'), 'utf8');
+const builtContactHtml = fs.readFileSync(path.join(root, 'dist', 'contact.html'), 'utf8');
+const builtAdminContactHtml = fs.readFileSync(path.join(root, 'dist', 'admin-contact.html'), 'utf8');
 const builtAdminHtml = fs.readFileSync(path.join(root, 'dist', 'admin.html'), 'utf8');
 const builtAuthConfirmHtml = fs.readFileSync(path.join(root, 'dist', 'auth-confirm.html'), 'utf8');
 const builtAuthResetHtml = fs.readFileSync(path.join(root, 'dist', 'auth-reset.html'), 'utf8');
@@ -334,8 +338,21 @@ test('Render build and start commands produce the directory used by the server',
   assert.equal(builtHtml, html);
   assert.equal(builtProductHtml, productHtml);
   assert.equal(builtPacksCollectionHtml, packsCollectionHtml);
+  assert.equal(builtContactHtml, contactHtml);
+  assert.equal(builtAdminContactHtml, adminContactHtml);
   assert.equal(builtAdminHtml, adminHtml);
   assert.equal(builtAuthConfirmHtml, authConfirmHtml);
+});
+
+test('contact navigation and form lead to a protected private inbox', () => {
+  for (const page of [html, productHtml, packsCollectionHtml, fs.readFileSync(path.join(root, 'frontend', 'tutorial.html'), 'utf8')]) {
+    assert.match(page, /href="\/pages\/contact">Contacto<\/a>/);
+  }
+  assert.match(contactHtml, /id="contactForm"/);
+  assert.match(contactHtml, /href="\/pages\/tutorial"/);
+  assert.match(adminHtml, /href="\/admin\/contact"/);
+  assert.match(server, /app\.post\('\/api\/contact'/);
+  assert.match(server, /app\.get\('\/api\/admin\/contact-messages', adminOnly/);
 });
 
 test('email confirmation uses the configured public origin and a protected callback', () => {

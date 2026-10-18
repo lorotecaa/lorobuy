@@ -13,6 +13,7 @@ import {
   setSessionCookies,
 } from './auth.mjs';
 import { loadConfig } from './config.mjs';
+import { createContactStore } from './contact.mjs';
 import {
   createLemonSqueezyCheckout,
   createLemonSqueezyDiscount,
@@ -30,16 +31,20 @@ const INDEX_FILE = path.join(FRONTEND_BUILD_DIR, 'index.html');
 const PRODUCT_FILE = path.join(FRONTEND_BUILD_DIR, 'product.html');
 const PACKS_COLLECTION_FILE = path.join(FRONTEND_BUILD_DIR, 'collection-packs.html');
 const TUTORIAL_FILE = path.join(FRONTEND_BUILD_DIR, 'tutorial.html');
+const CONTACT_FILE = path.join(FRONTEND_BUILD_DIR, 'contact.html');
+const ADMIN_CONTACT_FILE = path.join(FRONTEND_BUILD_DIR, 'admin-contact.html');
 const ADMIN_FILE = path.join(FRONTEND_BUILD_DIR, 'admin.html');
 const AUTH_CONFIRM_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-confirm.html');
 const AUTH_RESET_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-reset.html');
-if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(PACKS_COLLECTION_FILE) || !fs.existsSync(TUTORIAL_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(AUTH_RESET_FILE) || !fs.existsSync(ASSET_DIR)) {
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(PACKS_COLLECTION_FILE) || !fs.existsSync(TUTORIAL_FILE) || !fs.existsSync(CONTACT_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(ADMIN_CONTACT_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(AUTH_RESET_FILE) || !fs.existsSync(ASSET_DIR)) {
   throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
 }
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
 const productHtml = fs.readFileSync(PRODUCT_FILE, 'utf8');
 const packsCollectionHtml = fs.readFileSync(PACKS_COLLECTION_FILE, 'utf8');
 const tutorialHtml = fs.readFileSync(TUTORIAL_FILE, 'utf8');
+const contactHtml = fs.readFileSync(CONTACT_FILE, 'utf8');
+const adminContactHtml = fs.readFileSync(ADMIN_CONTACT_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
 const authResetHtml = fs.readFileSync(AUTH_RESET_FILE, 'utf8');
@@ -63,6 +68,14 @@ const tutorialContentSecurityPolicy = buildContentSecurityPolicy(tutorialHtml, {
   allowSameOriginStyles: true,
   mediaSources: [config.supabaseUrl],
 });
+const contactContentSecurityPolicy = buildContentSecurityPolicy(contactHtml, {
+  allowSameOriginScripts: true,
+  allowSameOriginStyles: true,
+});
+const adminContactContentSecurityPolicy = buildContentSecurityPolicy(adminContactHtml, {
+  allowSameOriginScripts: true,
+  allowSameOriginStyles: true,
+});
 const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml, {
   allowSameOriginScripts: true,
   allowSameOriginStyles: true,
@@ -76,6 +89,7 @@ const authConfirmContentSecurityPolicy = buildContentSecurityPolicy(authConfirmH
 const authResetContentSecurityPolicy = buildContentSecurityPolicy(authResetHtml);
 const publicSupabase = createPublicSupabase(config);
 const adminSupabase = createAdminSupabase(config);
+const contactStore = createContactStore(adminSupabase);
 const app = express();
 
 app.set('trust proxy', 1);
@@ -92,6 +106,8 @@ app.use(helmet({
 app.use((request, response, next) => {
   const pageContentSecurityPolicy = request.path === '/admin'
     ? adminContentSecurityPolicy
+    : request.path === '/admin/contact'
+      ? adminContactContentSecurityPolicy
     : request.path === '/auth/confirm'
       ? authConfirmContentSecurityPolicy
       : request.path === '/auth/reset-password'
@@ -100,6 +116,8 @@ app.use((request, response, next) => {
         ? packsCollectionContentSecurityPolicy
         : request.path === '/pages/tutorial'
           ? tutorialContentSecurityPolicy
+        : request.path === '/pages/contact'
+          ? contactContentSecurityPolicy
         : request.path.startsWith('/products/')
           ? productContentSecurityPolicy
           : contentSecurityPolicy;
@@ -175,7 +193,7 @@ app.post('/api/webhooks/lemon-squeezy', express.raw({ type: 'application/json', 
   return response.json({ received: true, result: data });
 }));
 
-app.use(express.json({ limit: '16kb', strict: true }));
+app.use(express.json({ limit: '32kb', strict: true }));
 app.use(express.urlencoded({ extended: false, limit: '8kb', parameterLimit: 20 }));
 app.use('/api', requireSameOrigin(config));
 
@@ -187,6 +205,8 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DISCOUNT_CODE_PATTERN = /^[A-Z0-9]{3,256}$/;
 const MIN_PASSWORD_LENGTH = 6;
 const PRIMARY_ADMIN_EMAIL = 'loroteca98@gmail.com';
+const CONTACT_REASONS = new Set(['download', 'before-buying', 'other']);
+const contactRate = new Map();
 const MEDIA_ASSET_VERSION = '20261005-stream-1';
 const PRODUCT_MEDIA_MIME_TYPES = new Map([
   ['image/jpeg', { type: 'image', extension: 'jpg' }],
@@ -935,6 +955,53 @@ app.post('/api/newsletter', asyncRoute(async (request, response) => {
     accepted: true,
     discount: { code: discountCode, percent: 10 },
   });
+}));
+
+app.post('/api/contact', asyncRoute(async (request, response) => {
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  if (request.body?.website) return response.status(202).json({ accepted: true });
+  const name = normalizeText(request.body?.name, 100);
+  const email = normalizeText(request.body?.email, 254, { required: true })?.toLowerCase();
+  const reason = request.body?.reason;
+  const orderNumber = normalizeText(request.body?.orderNumber, 100);
+  const message = normalizeText(request.body?.message, 4000, { required: true });
+  if (name === null || !email || !EMAIL_PATTERN.test(email) || !CONTACT_REASONS.has(reason)
+    || orderNumber === null || !message || message.length < 10) {
+    return response.status(400).json({ error: 'Revisa el correo y escribe un mensaje de al menos 10 caracteres.' });
+  }
+  if (!contactStore) return response.status(503).json({ error: 'El formulario no está disponible temporalmente.' });
+  const visitor = crypto.createHash('sha256').update(String(request.ip ?? 'unknown')).digest('hex');
+  const now = Date.now();
+  const attempts = (contactRate.get(visitor) ?? []).filter(time => now - time < 10 * 60_000);
+  if (attempts.length >= 4) return response.status(429).json({ error: 'Espera unos minutos antes de enviar otro mensaje.' });
+  attempts.push(now);
+  contactRate.set(visitor, attempts);
+  if (contactRate.size > 1000) {
+    for (const [key, times] of contactRate) {
+      if (times.every(time => now - time >= 10 * 60_000)) contactRate.delete(key);
+    }
+  }
+  try {
+    await contactStore.save({ name, email, reason, orderNumber, message });
+  } catch (error) {
+    attempts.splice(attempts.indexOf(now), 1);
+    throw error;
+  }
+  return response.status(201).json({ accepted: true });
+}));
+
+app.get('/api/admin/contact-messages', adminOnly, asyncRoute(async (_request, response) => {
+  if (!contactStore) return response.status(503).json({ error: 'El buzón no está configurado.' });
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({ messages: await contactStore.list() });
+}));
+
+app.get('/api/admin/contact-messages/:messageId', adminOnly, asyncRoute(async (request, response) => {
+  if (!contactStore) return response.status(503).json({ error: 'El buzón no está configurado.' });
+  const message = await contactStore.read(request.params.messageId);
+  if (!message) return response.status(404).json({ error: 'Mensaje no encontrado.' });
+  response.set('Cache-Control', 'private, no-store, max-age=0');
+  return response.json({ message });
 }));
 
 app.post('/api/downloads/:fileId', asyncRoute(async (request, response) => {
@@ -1820,6 +1887,22 @@ app.get('/admin', asyncRoute(async (request, response) => {
   return response.type('html').send(adminHtml);
 }));
 
+app.get('/admin/contact', asyncRoute(async (request, response) => {
+  const session = await getRequestSession(request, response, config);
+  if (!session || session.user.is_anonymous) {
+    return response.redirect(303, '/?auth=signin&next=%2Fadmin%2Fcontact');
+  }
+  const profile = await getSessionProfile(session);
+  if (profile?.role !== 'admin' || !session.user.email_confirmed_at) {
+    return response.redirect(303, '/?notice=admin-required');
+  }
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': adminContactContentSecurityPolicy,
+  });
+  return response.type('html').send(adminContactHtml);
+}));
+
 app.get('/auth/confirm', (_request, response) => {
   response.set({
     'Cache-Control': 'private, no-store, max-age=0',
@@ -1875,6 +1958,14 @@ app.get('/pages/tutorial', (_request, response) => {
   return response.type('html').send(tutorialHtml);
 });
 
+app.get('/pages/contact', (_request, response) => {
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': contactContentSecurityPolicy,
+  });
+  return response.type('html').send(contactHtml);
+});
+
 app.get('/products/:slug', (request, response) => {
   if (!SLUG_PATTERN.test(request.params.slug)) return response.status(404).type('text').send('Página no encontrada');
   response.set({
@@ -1895,7 +1986,7 @@ app.use((error, request, response, _next) => {
   }));
   if (response.headersSent) return;
   if (error?.type === 'entity.too.large') {
-    response.status(413).json({ error: 'La solicitud administrativa es demasiado grande.' });
+    response.status(413).json({ error: 'La solicitud es demasiado grande.' });
     return;
   }
   response.status(500).json({ error: 'El servicio no está disponible temporalmente.' });

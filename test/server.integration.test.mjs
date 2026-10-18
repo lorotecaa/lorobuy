@@ -429,6 +429,14 @@ test('Render server serves the unchanged storefront and reads catalog data from 
   assert.match(packsCollectionResponse.headers.get('content-security-policy') ?? '', /script-src 'self'/);
   assert.equal(packsCollectionResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
 
+  const tutorialResponse = await fetch(`${appOrigin}/pages/tutorial`);
+  assert.equal(tutorialResponse.status, 200);
+  assert.match(await tutorialResponse.text(), /TikTok LIVE Studio y OBS \| LoroBuy/);
+  assert.match(tutorialResponse.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+  assert.equal(tutorialResponse.headers.get('cache-control'), 'private, no-store, max-age=0');
+  assert.equal((await fetch(`${appOrigin}/assets/tutorial.js`)).status, 200);
+  assert.equal((await fetch(`${appOrigin}/assets/tutorial.css`)).status, 200);
+
   const invalidProductPageResponse = await fetch(`${appOrigin}/products/INVALID!`);
   assert.equal(invalidProductPageResponse.status, 404);
 

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Tutorial para TikTok LIVE Studio y OBS | LoroBuy</title>
+  <meta name="description" content="Aprende a usar tus animaciones LoroBuy en TikTok LIVE Studio y OBS con una guía visual paso a paso.">
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <link rel="stylesheet" href="/assets/tutorial.css?v=20261017-1">
+  <style>/* Los estilos de esta página se cargan desde el recurso local protegido. */</style>
+</head>
+<body>
+  <div class="announce">Las mejores animaciones para tus LIVE de TikTok</div>
+  <header class="site-head">
+    <div class="shell nav">
+      <button class="menu-button" type="button" aria-label="Abrir menú" aria-controls="tutorialNav" aria-expanded="false">☰</button>
+      <a class="brand" href="/" aria-label="LoroBuy: ir al inicio">Loro<span>Buy</span></a>
+      <nav class="nav-links" id="tutorialNav" aria-label="Navegación principal">
+        <a class="packs-link" href="/collections/packs-completos">Packs completos</a>
+        <a href="/#animaciones">Animaciones</a>
+        <a class="current" href="/pages/tutorial" aria-current="page">Tutorial</a>
+        <a href="/collections/packs-completos#productos">Catálogo</a>
+        <a href="/#contacto">Contacto</a>
+      </nav>
+      <div class="nav-tools">
+        <a class="tool-link" href="/collections/packs-completos#productos" aria-label="Buscar en el catálogo"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></a>
+        <a class="tool-link" href="/?auth=signin" aria-label="Mi cuenta"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"></circle><path d="M4 22a8 8 0 0 1 16 0"></path></svg></a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="tutorial-section shell" aria-labelledby="tutorialTitle">
+      <div class="tutorial-heading">
+        <div>
+          <h1 id="tutorialTitle">Así se usan en tu LIVE</h1>
+          <p>Elige el programa que usas y sigue el paso a paso. En menos de un minuto sabrás cómo lanzar tus animaciones.</p>
+        </div>
+        <div class="program-tabs" role="tablist" aria-label="Programa de streaming">
+          <button class="program-tab active" type="button" role="tab" id="studioTab" aria-controls="tutorialPanel" aria-selected="true" data-mode="studio">TikTok LIVE Studio</button>
+          <button class="program-tab" type="button" role="tab" id="obsTab" aria-controls="tutorialPanel" aria-selected="false" data-mode="obs" tabindex="-1">OBS</button>
+        </div>
+      </div>
+
+      <div class="tutorial-grid" id="tutorialPanel" role="tabpanel" aria-labelledby="studioTab">
+        <div class="tutorial-demo" id="tutorialDemo" data-mode="studio" data-step="0" aria-label="Demostración visual del paso seleccionado">
+          <div class="demo-titlebar"><span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span><strong data-app-title>TikTok LIVE Studio</strong><span class="demo-live"><i></i> LIVE</span></div>
+          <div class="demo-workspace">
+            <div class="demo-left-panel" aria-hidden="true"><span class="mock-label">Escenas</span><span class="mock-scene">Escena principal</span><span class="mock-label">Fuentes</span><span class="mock-source">▣ Cámara</span><span class="mock-source video-source">▷ <span data-source-label>Vídeo: mi animación</span><i class="eye">◉</i></span><span class="add-source">＋ <span data-add-label>Añadir fuente</span></span></div>
+            <div class="demo-canvas"><span class="canvas-live">LIVE</span><span class="viewer-count">◉ 1.2K</span><div class="camera-person" aria-hidden="true"><span class="person-head"></span><span class="person-body"></span></div><div class="effect-frame"><video id="tutorialVideo" muted playsinline loop preload="none" crossorigin="anonymous" disablepictureinpicture aria-label="Vista previa de una animación LoroBuy"></video></div><span class="canvas-caption">VISTA PREVIA · LOROBUY</span></div>
+          </div>
+          <div class="demo-dock" aria-hidden="true"><div><b data-dock-name>Fuentes</b><span class="dock-row">▣ Cámara</span><span class="dock-row dock-video">▷ Mi animación</span><span class="dock-plus">＋</span></div><div><b>Audio</b><span class="audio-meter"></span><span class="audio-meter short"></span></div></div>
+          <div class="demo-dialog" aria-hidden="true"><div class="dialog-head"><b data-dialog-title>Añadir fuente</b><span>×</span></div><div class="dialog-options"><span>▣ Cámara</span><span class="choice-video" data-choice-label>▷ Vídeo</span><span>▤ Imagen</span><span>▦ Texto</span></div><div class="dialog-file"><span>Archivo local</span><strong>mi-animación.webm</strong><span class="browse-chip">Examinar</span></div><div class="dialog-settings"><span>Repetir / Bucle <b>Apagado</b></span><span>Reiniciar al activarse <b>Encendido</b></span></div><span class="dialog-accept" data-accept-label>Añadir fuente</span></div>
+          <div class="demo-step-badge" aria-live="polite">Paso <span data-demo-step>1</span> de 5</div>
+        </div>
+
+        <div class="tutorial-guide">
+          <ol class="step-list" id="stepList" aria-label="Pasos del tutorial"></ol>
+          <div class="tutorial-controls">
+            <button class="control-button" id="soundButton" type="button" aria-pressed="false"><span aria-hidden="true">♬</span><span data-sound-label>Activar sonido</span></button>
+            <button class="control-button" id="pauseButton" type="button" aria-pressed="false">Pausar</button>
+          </div>
+          <p class="guide-note">Puedes tocar cualquier paso para verlo de nuevo. La demostración avanza automáticamente.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="tutorial-cta"><div class="shell cta-inner"><div><span>Ya está todo listo</span><h2>Ahora elige la animación<br>para tu próximo LIVE</h2></div><a href="/collections/packs-completos">Ver packs completos <span aria-hidden="true">↗</span></a></div></section>
+  </main>
+
+  <footer id="contacto"><div class="shell footer-inner"><a class="brand" href="/">Loro<span>Buy</span></a><p>Animaciones para TikTok LIVE Studio y OBS.</p><div><a href="/collections/packs-completos">Packs</a><a href="/#contacto">Contacto</a></div><small>© 2026 LoroBuy</small></div></footer>
+  <script>/* El comportamiento de esta página se carga desde el recurso local protegido. */</script>
+  <script src="/assets/tutorial.js?v=20261017-1" defer></script>
+</body>
+</html>

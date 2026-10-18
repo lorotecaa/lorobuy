@@ -29,15 +29,17 @@ const ASSET_DIR = path.join(FRONTEND_BUILD_DIR, 'assets');
 const INDEX_FILE = path.join(FRONTEND_BUILD_DIR, 'index.html');
 const PRODUCT_FILE = path.join(FRONTEND_BUILD_DIR, 'product.html');
 const PACKS_COLLECTION_FILE = path.join(FRONTEND_BUILD_DIR, 'collection-packs.html');
+const TUTORIAL_FILE = path.join(FRONTEND_BUILD_DIR, 'tutorial.html');
 const ADMIN_FILE = path.join(FRONTEND_BUILD_DIR, 'admin.html');
 const AUTH_CONFIRM_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-confirm.html');
 const AUTH_RESET_FILE = path.join(FRONTEND_BUILD_DIR, 'auth-reset.html');
-if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(PACKS_COLLECTION_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(AUTH_RESET_FILE) || !fs.existsSync(ASSET_DIR)) {
+if (!fs.existsSync(INDEX_FILE) || !fs.existsSync(PRODUCT_FILE) || !fs.existsSync(PACKS_COLLECTION_FILE) || !fs.existsSync(TUTORIAL_FILE) || !fs.existsSync(ADMIN_FILE) || !fs.existsSync(AUTH_CONFIRM_FILE) || !fs.existsSync(AUTH_RESET_FILE) || !fs.existsSync(ASSET_DIR)) {
   throw new Error('Frontend build is missing. Run `npm run build` before starting LoroBuy.');
 }
 const storefrontHtml = fs.readFileSync(INDEX_FILE, 'utf8');
 const productHtml = fs.readFileSync(PRODUCT_FILE, 'utf8');
 const packsCollectionHtml = fs.readFileSync(PACKS_COLLECTION_FILE, 'utf8');
+const tutorialHtml = fs.readFileSync(TUTORIAL_FILE, 'utf8');
 const adminHtml = fs.readFileSync(ADMIN_FILE, 'utf8');
 const authConfirmHtml = fs.readFileSync(AUTH_CONFIRM_FILE, 'utf8');
 const authResetHtml = fs.readFileSync(AUTH_RESET_FILE, 'utf8');
@@ -54,6 +56,11 @@ const packsCollectionContentSecurityPolicy = buildContentSecurityPolicy(packsCol
   allowSameOriginScripts: true,
   allowSameOriginStyles: true,
   imageSources: [config.supabaseUrl],
+  mediaSources: [config.supabaseUrl],
+});
+const tutorialContentSecurityPolicy = buildContentSecurityPolicy(tutorialHtml, {
+  allowSameOriginScripts: true,
+  allowSameOriginStyles: true,
   mediaSources: [config.supabaseUrl],
 });
 const adminContentSecurityPolicy = buildContentSecurityPolicy(adminHtml, {
@@ -91,6 +98,8 @@ app.use((request, response, next) => {
         ? authResetContentSecurityPolicy
       : request.path === '/collections/packs-completos'
         ? packsCollectionContentSecurityPolicy
+        : request.path === '/pages/tutorial'
+          ? tutorialContentSecurityPolicy
         : request.path.startsWith('/products/')
           ? productContentSecurityPolicy
           : contentSecurityPolicy;
@@ -1856,6 +1865,14 @@ app.get('/collections/packs-completos', (_request, response) => {
     'Content-Security-Policy': packsCollectionContentSecurityPolicy,
   });
   return response.type('html').send(packsCollectionHtml);
+});
+
+app.get('/pages/tutorial', (_request, response) => {
+  response.set({
+    'Cache-Control': 'private, no-store, max-age=0',
+    'Content-Security-Policy': tutorialContentSecurityPolicy,
+  });
+  return response.type('html').send(tutorialHtml);
 });
 
 app.get('/products/:slug', (request, response) => {

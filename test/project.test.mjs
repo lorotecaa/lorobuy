@@ -350,6 +350,8 @@ test('contact navigation and form lead to a protected private inbox', () => {
   }
   assert.match(contactHtml, /id="contactForm"/);
   assert.match(contactHtml, /href="\/pages\/tutorial"/);
+  assert.match(contactHtml, /href="https:\/\/www\.tiktok\.com\/@loroteca"/);
+  assert.match(contactHtml, /Escríbenos en TikTok/);
   assert.match(adminHtml, /href="\/admin\/contact"/);
   assert.match(server, /app\.post\('\/api\/contact'/);
   assert.match(server, /app\.get\('\/api\/admin\/contact-messages', adminOnly/);
